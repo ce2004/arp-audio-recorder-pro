@@ -3,3 +3,5 @@ win10toast
 soundcard
 soundfile
 numpy
+keyboard
+accessible_output2
