@@ -28,17 +28,16 @@ jobs:
         pip install pyinstaller
         
     - name: Build with PyInstaller
-      run: pyinstaller --windowed app.py
+      run: pyinstaller --windowed --name "Audio Recorder Pro" app.py
         
     - name: Create Zip Archive
       run: |
-        xcopy sounds dist\app\sounds\ /E /I
-        Rename-Item -Path dist\app -NewName ARP_Audio_Recorder
-        Compress-Archive -Path dist\ARP_Audio_Recorder\* -DestinationPath dist\app.zip
+        xcopy sounds "dist\Audio Recorder Pro\sounds\" /E /I
+        Compress-Archive -Path "dist\Audio Recorder Pro\*" -DestinationPath "dist\Audio Recorder Pro.zip"
 
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/app.zip
+        files: "dist/Audio Recorder Pro.zip"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
