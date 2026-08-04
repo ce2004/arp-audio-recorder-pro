@@ -1,43 +1,35 @@
 import os
-import sys
-import urllib.request
-import json
-import subprocess
-import zipfile
-import shutil
 import time
 import threading
+import subprocess
+import urllib.request
+import urllib.error
+import json
+import sys
 
 try:
     from PyQt6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QListWidget, QPushButton, QHBoxLayout
     from PyQt6.QtCore import Qt
 except ImportError:
-    pass
+    print("Please install PyQt6.")
+    sys.exit(1)
 
 try:
     import numpy as np
     import soundcard as sc
     import keyboard
     import accessible_output2.outputs.auto
-    HAS_ACCESSIBILITY = True
 except ImportError:
-    HAS_ACCESSIBILITY = False
+    print("Please install numpy, soundcard, keyboard, and accessible_output2 modules.")
+    sys.exit(1)
 
-GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.6"
-
-# Globals for download tracking
 stop_beeping = False
 current_progress = 0.0
 current_speed_kb = 0
 current_eta_s = 0
 current_downloaded_bytes = 0
 current_total_bytes = 0
-
-if HAS_ACCESSIBILITY:
-    speaker = accessible_output2.outputs.auto.Auto()
-else:
-    speaker = None
+speaker = accessible_output2.outputs.auto.Auto()
 
 def beep_loop():
     global stop_beeping, current_progress
@@ -59,7 +51,6 @@ def beep_loop():
         print("Beep error:", e)
 
 def announce_progress(e=None):
-    if not speaker: return
     pct = int(current_progress * 100)
     mb_s = round(current_speed_kb / 1024, 1)
     dl_mb = round(current_downloaded_bytes / (1024*1024), 1)
@@ -86,7 +77,6 @@ class UpdateDialog(QDialog):
         self.changes_list = QListWidget()
         for line in release_notes.split('\n'):
             line = line.strip()
-            # clean up markdown bullets
             if line.startswith("-") or line.startswith("*"):
                 line = line[1:].strip()
             if line:
@@ -108,56 +98,28 @@ class UpdateDialog(QDialog):
         self.setTabOrder(self.changes_list, self.btn_yes)
         self.setTabOrder(self.btn_yes, self.btn_no)
 
-def check_for_updates():
-    try:
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode())
-        
-        latest_version = data['tag_name']
-        release_notes = data.get('body', '')
-        
-        if latest_version != CURRENT_VERSION:
-            download_url = None
-            for asset in data.get('assets', []):
-                if asset['name'].endswith('.zip'):
-                    download_url = asset['browser_download_url']
-                    break
-            
-            if download_url:
-                return latest_version, download_url, release_notes
-    except Exception as e:
-        print("Failed to check for updates:", e)
-    return None, None, None
-
-def apply_update(download_url):
+def test_download():
     global current_progress, current_speed_kb, current_eta_s, stop_beeping, current_downloaded_bytes, current_total_bytes
+    
+    print("Starting test download... Press SPACE to hear progress!")
+    speaker.speak("Starting test download. Press space to hear progress.")
+    
+    test_url = "https://www.python.org/ftp/python/3.11.5/python-3.11.5-amd64.exe"
+    
+    keyboard.on_press_key("space", announce_progress)
+    
+    beep_thread = threading.Thread(target=beep_loop, daemon=True)
+    beep_thread.start()
+    
     try:
-        if not getattr(sys, 'frozen', False):
-            print("Not running as compiled exe, skipping update.")
-            return
-
-        exe_path = sys.executable
-        app_dir = os.path.dirname(exe_path)
-        temp_zip = os.path.join(app_dir, "update.zip")
-        extract_dir = os.path.join(app_dir, "update_extract")
-        
-        print(f"Downloading update from {download_url}...")
-        
-        if HAS_ACCESSIBILITY:
-            keyboard.on_press_key("space", announce_progress)
-            beep_thread = threading.Thread(target=beep_loop, daemon=True)
-            beep_thread.start()
-        
-        req = urllib.request.Request(download_url, headers={'User-Agent': 'Mozilla/5.0'})
+        req = urllib.request.Request(test_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as response:
             current_total_bytes = int(response.getheader('Content-Length').strip())
             current_downloaded_bytes = 0
             chunk_size = 8192
             start_time = time.time()
             
-            with open(temp_zip, 'wb') as f:
+            with open("test_download.tmp", 'wb') as f:
                 while True:
                     chunk = response.read(chunk_size)
                     if not chunk:
@@ -170,59 +132,27 @@ def apply_update(download_url):
                     if elapsed > 0:
                         current_speed_kb = int((current_downloaded_bytes / 1024) / elapsed)
                         current_eta_s = int((current_total_bytes - current_downloaded_bytes) / (current_downloaded_bytes / elapsed))
-        
-        stop_beeping = True
-        if HAS_ACCESSIBILITY:
-            keyboard.unhook_all()
-            speaker.speak("Download complete, installing...", interrupt=True)
-            
-        with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
-            zip_ref.extractall(extract_dir)
-        
-        for item in os.listdir(extract_dir):
-            s = os.path.join(extract_dir, item)
-            d = os.path.join(app_dir, item)
-            old_d = d + ".old"
-            
-            if os.path.exists(d):
-                if os.path.exists(old_d):
-                    try:
-                        if os.path.isdir(old_d): shutil.rmtree(old_d)
-                        else: os.remove(old_d)
-                    except:
-                        pass
-                try:
-                    os.rename(d, old_d)
-                except:
+                    
                     pass
-            
-            if os.path.isdir(s):
-                shutil.copytree(s, d)
-            else:
-                shutil.copy2(s, d)
-        
-        os.remove(temp_zip)
-        shutil.rmtree(extract_dir)
-        
-        print("Update applied successfully! Restarting...")
-        subprocess.Popen([exe_path] + sys.argv[1:])
-        sys.exit(0)
+                    
+        print("\nDownload complete!")
+        speaker.speak("Download complete.")
+        time.sleep(2)
     except Exception as e:
-        print("Error applying update:", e)
+        print("Download error:", e)
+    finally:
         stop_beeping = True
-        if HAS_ACCESSIBILITY: keyboard.unhook_all()
-
-def run_auto_updater():
-    version, url, notes = check_for_updates()
-    if url:
-        # Create a temporary QApplication to show the dialog before the main app starts
-        app = QApplication.instance()
-        if not app:
-            app = QApplication(sys.argv)
-            
-        dialog = UpdateDialog(CURRENT_VERSION, version, notes)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            apply_update(url)
+        keyboard.unhook_all()
+        if os.path.exists("test_download.tmp"):
+            os.remove("test_download.tmp")
 
 if __name__ == "__main__":
-    run_auto_updater()
+    app = QApplication(sys.argv)
+    
+    test_release_notes = "Added a cool new feature\n- Fixed a crash on startup\n* Improved NVDA accessibility support!"
+    
+    dialog = UpdateDialog("v1.0.4", "v1.0.5", test_release_notes)
+    if dialog.exec() == QDialog.DialogCode.Accepted:
+        test_download()
+    else:
+        print("Update cancelled by user.")
