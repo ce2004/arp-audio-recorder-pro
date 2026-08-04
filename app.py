@@ -315,7 +315,9 @@ class TimeFormatSpinBox(QSpinBox):
 
     def validate(self, text, pos):
         from PyQt6.QtGui import QValidator
-        return (QValidator.State.Acceptable, text, pos)
+        if '-' in text:
+            return (QValidator.State.Invalid, text, pos)
+        return (QValidator.State.Intermediate, text, pos)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Home:
@@ -442,7 +444,7 @@ class SettingsDialog(QDialog):
         file_form.addRow(self.chk_auto_start)
         
         self.spin_delay = TimeFormatSpinBox()
-        self.spin_delay.setRange(0, 3600)
+        self.spin_delay.setRange(1, 3600)
         
         delay_lbl = QLabel("Start De&lay:")
         delay_lbl.setBuddy(self.spin_delay)
