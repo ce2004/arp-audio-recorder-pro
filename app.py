@@ -12,14 +12,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
 
-
-try:
-    import updater
-    updater.run_auto_updater()
-except Exception as e:
-    print("Updater failed to run:", e)
-
-
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recorder_config.json")
 
 def load_config():
@@ -47,6 +39,7 @@ def load_config():
         "notify_mic_disconnect": True,
         "continue_on_mic_disconnect": False,
         "confirm_exit": True,
+        "check_updates_startup": True,
         "snd_start": True,
         "snd_stop": True,
         "snd_pause": True,
@@ -158,6 +151,14 @@ class SoundSettingsDialog(QDialog):
         self.config["snd_volume"] = self.spin_volume.value()
         save_config(self.config)
         self.accept()
+
+config = load_config()
+if config.get("check_updates_startup", True):
+    try:
+        import updater
+        updater.run_auto_updater()
+    except Exception as e:
+        print("Updater failed to run:", e)
 
 class PercentageSpinBox(QSpinBox):
     def textFromValue(self, value):
@@ -449,8 +450,13 @@ class SettingsDialog(QDialog):
         
         title_lbl = QLabel("Window &Title:")
         self.txt_title = QLineEdit()
+        self.txt_title.setText(self.config.get("window_title", "Accessible Advanced Audio Recorder"))
         title_lbl.setBuddy(self.txt_title)
         misc_form.addRow(title_lbl, self.txt_title)
+        
+        self.chk_update_startup = QCheckBox("Check for &updates on startup")
+        self.chk_update_startup.setChecked(self.config.get("check_updates_startup", True))
+        misc_form.addRow("", self.chk_update_startup)
         
         btn_notif = QPushButton("Configure Notifications")
         btn_notif.clicked.connect(self.open_notifications)
@@ -578,6 +584,8 @@ class SettingsDialog(QDialog):
         self.config["buffer_size"] = int(self.buf_cb.currentText())
         
         self.config["window_title"] = self.txt_title.text()
+        self.config["check_updates_startup"] = self.chk_update_startup.isChecked()
+        
         self.config["save_folder"] = self.txt_folder.text()
             
         save_config(self.config)
