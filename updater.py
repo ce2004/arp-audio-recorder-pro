@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.13"
+CURRENT_VERSION = "v1.0.14"
 
 # Globals for download tracking
 stop_beeping = False
@@ -131,6 +131,27 @@ def check_for_updates():
         print("Failed to check for updates:", e)
     return None, None, None
 
+def cleanup_old_updates():
+    app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+    cleanup_file = os.path.join(app_dir, ".update_cleanup")
+    if os.path.exists(cleanup_file):
+        try:
+            with open(cleanup_file, "r") as f:
+                update_hash = f.read().strip()
+            if update_hash:
+                import shutil
+                for item in os.listdir(app_dir):
+                    if item.endswith(f".old_{update_hash}"):
+                        path = os.path.join(app_dir, item)
+                        try:
+                            if os.path.isdir(path): shutil.rmtree(path)
+                            else: os.remove(path)
+                        except:
+                            pass
+            os.remove(cleanup_file)
+        except:
+            pass
+
 def apply_update(download_url):
     global current_progress, current_speed_kb, current_eta_s, stop_beeping, current_downloaded_bytes, current_total_bytes
     try:
@@ -180,10 +201,14 @@ def apply_update(download_url):
         with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
             zip_ref.extractall(extract_dir)
         
+        import hashlib
+        update_hash = hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
+        cleanup_file = os.path.join(app_dir, ".update_cleanup")
+        
         for item in os.listdir(extract_dir):
             s = os.path.join(extract_dir, item)
             d = os.path.join(app_dir, item)
-            old_d = d + ".old"
+            old_d = d + f".old_{update_hash}"
             
             if os.path.exists(d):
                 if os.path.exists(old_d):
@@ -205,6 +230,12 @@ def apply_update(download_url):
         os.remove(temp_zip)
         shutil.rmtree(extract_dir)
         
+        try:
+            with open(cleanup_file, "w") as f:
+                f.write(update_hash)
+        except:
+            pass
+        
         print("Update applied successfully! Restarting...")
         subprocess.Popen([exe_path] + sys.argv[1:])
         sys.exit(0)
@@ -214,6 +245,7 @@ def apply_update(download_url):
         if HAS_ACCESSIBILITY: keyboard.unhook_all()
 
 def run_auto_updater():
+    cleanup_old_updates()
     version, url, notes = check_for_updates()
     if url:
         # Create a temporary QApplication to show the dialog before the main app starts
