@@ -30,9 +30,16 @@ jobs:
     - name: Build with PyInstaller
       run: pyinstaller --onefile --windowed app.py
         
+    - name: Create Zip Archive
+      run: |
+        mkdir dist\ARP_Audio_Recorder
+        copy dist\app.exe dist\ARP_Audio_Recorder\
+        xcopy sounds dist\ARP_Audio_Recorder\sounds\ /E /I
+        Compress-Archive -Path dist\ARP_Audio_Recorder\* -DestinationPath dist\app.zip
+
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/app.exe
+        files: dist/app.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
