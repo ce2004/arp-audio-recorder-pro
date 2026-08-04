@@ -33,27 +33,11 @@ jobs:
     - name: Create Zip Archive
       run: |
         xcopy sounds "dist\Audio Recorder Pro\sounds\" /E /I
-        copy README.md "dist\Audio Recorder Pro\"
-        copy CHANGELOG.md "dist\Audio Recorder Pro\"
         Compress-Archive -Path "dist\Audio Recorder Pro\*" -DestinationPath "dist\Audio Recorder Pro.zip"
 
-    - name: Extract Release Notes
-      id: extract_notes
-      shell: python
+    - name: Extract Commit Message
       run: |
-        notes = []
-        capture = False
-        with open('CHANGELOG.md', 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.startswith('v'):
-                    if capture: break
-                    capture = True
-                    continue
-                if capture:
-                    if line.startswith('---'): break
-                    if line.strip(): notes.append(line.strip())
-        with open('release_notes.txt', 'w', encoding='utf-8') as f:
-            f.write('\n'.join(notes))
+        git log -1 --pretty=%B | Out-File -FilePath release_notes.txt -Encoding utf8
 
     - name: Release
       uses: softprops/action-gh-release@v1

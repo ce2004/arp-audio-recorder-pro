@@ -3,7 +3,7 @@ AI ASSISTANT GUIDE - REPOSITORY PROTOCOLS AND RELEASE WORKFLOW
 Hello AI Assistant! The repository owner relies on a screen reader (NVDA) for accessibility. When assisting the owner and pushing new updates, you must strictly follow the protocols and automated release workflows detailed below.
 
 CRITICAL FORMATTING RULE: NO MARKDOWN NUMBER SIGNS
-Do not use the "#" character for markdown headers in ANY file (such as README.md, CHANGELOG.md, or this guide). Screen readers read "#" out loud as the word "Number", which ruins the reading experience. Instead, use ALL CAPS or standard text with dashed underlines ("---") to denote sections.
+Do not use the "#" character for markdown headers in ANY file. Screen readers read "#" out loud as the word "Number", which ruins the reading experience. Instead, use ALL CAPS or standard text with dashed underlines ("---") to denote sections.
 
 ---
 
@@ -12,32 +12,22 @@ HOW TO PUSH A NEW UPDATE
 When the user asks you to "push this as a new update", you must execute the following steps precisely in order:
 
 STEP 1: BUMP THE VERSION
-Open updater.py and increment the CURRENT_VERSION variable near the top of the file (e.g., change "v1.0.9" to "v1.0.10"). The version string must begin with a lowercase "v".
+Open updater.py and increment the CURRENT_VERSION variable near the top of the file (e.g., change "v1.0.12" to "v1.0.13"). The version string must begin with a lowercase "v".
 
-STEP 2: UPDATE THE CHANGELOG
-Open CHANGELOG.md and append the new version, the current date, and a bulleted list of changes made. 
-Remember: Do not use number signs ("#"). Follow the existing format exactly:
-v1.0.10 - YYYY-MM-DD
-Added:
-- Description of feature
-Changed:
-- Description of change
+STEP 2: COMMIT THE CHANGES WITH RELEASE NOTES
+Stage your modified files and commit them. The commit message is EXTREMELY important! The GitHub Actions workflow is configured to extract your exact git commit message and use it directly as the official Release Notes on GitHub!
+Because the user's application reads the release notes directly to them using their screen reader, you MUST format your commit message like a clean list of changes without any markdown number signs.
 
-STEP 3: UPDATE THE README (IF NECESSARY)
-If the new update introduces new mechanics, features, or requires new dependencies, update README.md to reflect this. Do not use number signs for headers.
+Command: git commit -m "Added X feature. Fixed Y bug. Changed Z functionality."
 
-STEP 4: COMMIT THE CHANGES
-Stage your modified files and commit them.
-Command: git commit -m "Your descriptive commit message here"
-
-STEP 5: PUSH TO MAIN
+STEP 3: PUSH TO MAIN
 Push the commits to the main branch.
 Command: git push origin main
 
-STEP 6: TAG AND TRIGGER THE RELEASE
+STEP 4: TAG AND TRIGGER THE RELEASE
 The compilation and publishing process is entirely handled by a GitHub Action (release.yml). The action is triggered exclusively by pushing a version tag.
 Create a tag that EXACTLY matches the version you put in updater.py, and push it to origin.
-Command: git tag v1.0.10
-Command: git push origin v1.0.10
+Command: git tag v1.0.13
+Command: git push origin v1.0.13
 
-Once the tag is pushed, your job is done. GitHub will automatically compile the Python script into a Windows executable via PyInstaller, copy the sounds folder and README, zip it all as "Audio Recorder Pro.zip", and attach it to a newly generated Release page on GitHub.
+Once the tag is pushed, your job is done. GitHub will automatically compile the Python script into a Windows executable via PyInstaller, extract your commit message as the release notes, zip it all as "Audio Recorder Pro.zip", and attach it to a newly generated Release page on GitHub.

@@ -602,14 +602,6 @@ class AudioRecorderApp(QMainWindow):
         self.current_session_folder = None
         self.current_status_msg = "Status: Ready"
         
-        from PyQt6.QtWidgets import QSystemTrayIcon
-        from PyQt6.QtGui import QIcon, QPixmap
-        self.notifier = QSystemTrayIcon(self)
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.GlobalColor.red)
-        self.notifier.setIcon(QIcon(pixmap))
-        self.notifier.show()
-        
         self.needs_split = False
         self.split_timer = QTimer(self)
         self.split_timer.timeout.connect(self.do_auto_split)
@@ -665,7 +657,13 @@ class AudioRecorderApp(QMainWindow):
         if not self.config.get(setting_key, True):
             return
         try:
-            self.notifier.showMessage(title, msg, QSystemTrayIcon.MessageIcon.Information, 3000)
+            from plyer import notification
+            notification.notify(
+                title=title,
+                message=msg,
+                app_name="Audio Recorder Pro",
+                timeout=3
+            )
         except Exception as e:
             print(f"Notification failed: {e}")
 
