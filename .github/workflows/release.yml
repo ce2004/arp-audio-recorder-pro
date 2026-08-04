@@ -34,6 +34,7 @@ jobs:
       run: |
         xcopy sounds "dist\Audio Recorder Pro\sounds\" /E /I
         copy README.md "dist\Audio Recorder Pro\"
+        copy CHANGELOG.md "dist\Audio Recorder Pro\"
         Compress-Archive -Path "dist\Audio Recorder Pro\*" -DestinationPath "dist\Audio Recorder Pro.zip"
 
     - name: Extract Release Notes
