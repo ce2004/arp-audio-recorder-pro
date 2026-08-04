@@ -470,7 +470,7 @@ class SettingsDialog(QDialog):
         title_lbl.setBuddy(self.txt_title)
         misc_form.addRow(title_lbl, self.txt_title)
         
-                self.chk_update_startup = QCheckBox("Check for &updates on startup")
+        self.chk_update_startup = QCheckBox("Check for &updates on startup")
         self.chk_update_startup.setChecked(self.config.get("check_updates_startup", True))
         misc_form.addRow(self.chk_update_startup)
         
