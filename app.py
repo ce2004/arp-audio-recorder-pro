@@ -602,8 +602,13 @@ class AudioRecorderApp(QMainWindow):
         self.current_session_folder = None
         self.current_status_msg = "Status: Ready"
         
-        from win10toast import ToastNotifier
-        self.notifier = ToastNotifier()
+        from PyQt6.QtWidgets import QSystemTrayIcon
+        from PyQt6.QtGui import QIcon, QPixmap
+        self.notifier = QSystemTrayIcon(self)
+        pixmap = QPixmap(32, 32)
+        pixmap.fill(Qt.GlobalColor.red)
+        self.notifier.setIcon(QIcon(pixmap))
+        self.notifier.show()
         
         self.needs_split = False
         self.split_timer = QTimer(self)
@@ -660,14 +665,19 @@ class AudioRecorderApp(QMainWindow):
         if not self.config.get(setting_key, True):
             return
         try:
-            self.notifier.show_toast(title, msg, duration=3, threaded=True)
+            self.notifier.showMessage(title, msg, QSystemTrayIcon.MessageIcon.Information, 3000)
         except Exception as e:
             print(f"Notification failed: {e}")
 
     def play_sound(self, event_name):
         if not self.config.get(f"snd_{event_name}", True): return
         
-        path = os.path.join(os.path.dirname(__file__), "sounds", f"{event_name}.wav")
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(__file__)
+            
+        path = os.path.join(base_dir, "sounds", f"{event_name}.wav")
         if os.path.exists(path):
             from PyQt6.QtMultimedia import QSoundEffect
             from PyQt6.QtCore import QUrl

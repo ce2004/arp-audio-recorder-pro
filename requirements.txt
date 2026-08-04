@@ -1,5 +1,4 @@
 PyQt6
-win10toast
 soundcard
 soundfile
 numpy
