@@ -2,6 +2,12 @@ Changelog
 
 All notable changes to ARP Audio Recorder Pro will be documented in this file.
 
+v1.0.11 - 2026-08-04
+Changed:
+- Forced a minor version bump to verify that the auto-updater correctly prompts the user for new updates.
+
+---
+
 v1.0.10 - 2026-08-04
 Fixed:
 - Migrated notifications from win10toast to native QSystemTrayIcon to fix a bug where notifications failed to appear in the compiled executable.
