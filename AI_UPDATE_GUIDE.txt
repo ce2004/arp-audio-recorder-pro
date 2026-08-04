@@ -27,7 +27,7 @@ STEP 3: UPDATE THE README (IF NECESSARY)
 If the new update introduces new mechanics, features, or requires new dependencies, update README.md to reflect this. Do not use number signs for headers.
 
 STEP 4: COMMIT THE CHANGES
-Stage your modified files and commit them. The commit message is important! The GitHub Actions workflow is configured with "generate_release_notes: true", which means your commit messages will be automatically scraped and shown as the release notes in the user's updater dialog. Write clear, descriptive commit messages.
+Stage your modified files and commit them.
 Command: git commit -m "Your descriptive commit message here"
 
 STEP 5: PUSH TO MAIN

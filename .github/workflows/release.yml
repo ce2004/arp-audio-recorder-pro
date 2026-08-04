@@ -36,10 +36,28 @@ jobs:
         copy README.md "dist\Audio Recorder Pro\"
         Compress-Archive -Path "dist\Audio Recorder Pro\*" -DestinationPath "dist\Audio Recorder Pro.zip"
 
+    - name: Extract Release Notes
+      id: extract_notes
+      shell: python
+      run: |
+        notes = []
+        capture = False
+        with open('CHANGELOG.md', 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.startswith('v'):
+                    if capture: break
+                    capture = True
+                    continue
+                if capture:
+                    if line.startswith('---'): break
+                    if line.strip(): notes.append(line.strip())
+        with open('release_notes.txt', 'w', encoding='utf-8') as f:
+            f.write('\n'.join(notes))
+
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
         files: "dist/Audio Recorder Pro.zip"
-        generate_release_notes: true
+        body_path: release_notes.txt
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
