@@ -8,7 +8,7 @@ import shutil
 
 # We will set this to your GitHub username and repository later
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.3"
+CURRENT_VERSION = "v1.0.4"
 
 def check_for_updates():
     try:
@@ -49,30 +49,29 @@ def apply_update(download_url):
             with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
             
-            # Windows trick: You can rename a running file, just not delete it.
-            if os.path.exists(old_exe):
-                try:
-                    os.remove(old_exe)
-                except:
-                    pass
-            os.rename(exe_path, old_exe)
-            
-            # Copy all extracted files to the main directory
+            # Windows trick: You can rename running files and folders, just not delete them.
             for item in os.listdir(extract_dir):
                 s = os.path.join(extract_dir, item)
                 d = os.path.join(app_dir, item)
-                if os.path.isdir(s):
-                    # If it's a directory like 'sounds', copy it over, replacing existing
-                    if os.path.exists(d):
-                        shutil.rmtree(d)
-                    shutil.copytree(s, d)
-                else:
-                    if os.path.exists(d):
-                        # Don't try to remove the currently running exe (it was already renamed to .old though)
+                old_d = d + ".old"
+                
+                # If an old version of this exists, rename it out of the way
+                if os.path.exists(d):
+                    if os.path.exists(old_d):
                         try:
-                            os.remove(d)
+                            if os.path.isdir(old_d): shutil.rmtree(old_d)
+                            else: os.remove(old_d)
                         except:
                             pass
+                    try:
+                        os.rename(d, old_d)
+                    except:
+                        pass
+                
+                # Now move the new item in place
+                if os.path.isdir(s):
+                    shutil.copytree(s, d)
+                else:
                     shutil.copy2(s, d)
             
             # Clean up temp files

@@ -28,13 +28,12 @@ jobs:
         pip install pyinstaller
         
     - name: Build with PyInstaller
-      run: pyinstaller --onefile --windowed app.py
+      run: pyinstaller --windowed app.py
         
     - name: Create Zip Archive
       run: |
-        mkdir dist\ARP_Audio_Recorder
-        copy dist\app.exe dist\ARP_Audio_Recorder\
-        xcopy sounds dist\ARP_Audio_Recorder\sounds\ /E /I
+        xcopy sounds dist\app\sounds\ /E /I
+        Rename-Item -Path dist\app -NewName ARP_Audio_Recorder
         Compress-Archive -Path dist\ARP_Audio_Recorder\* -DestinationPath dist\app.zip
 
     - name: Release
