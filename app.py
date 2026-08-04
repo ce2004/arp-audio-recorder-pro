@@ -12,6 +12,14 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
 
+HAS_ACCESSIBILITY = False
+try:
+    import accessible_output2.outputs.auto
+    speaker = accessible_output2.outputs.auto.Auto()
+    HAS_ACCESSIBILITY = True
+except ImportError:
+    pass
+
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recorder_config.json")
 
 def load_config():
@@ -638,6 +646,7 @@ class AudioRecorderApp(QMainWindow):
         self.record_thread_handle = None
         self.current_filename = None
         self.current_session_folder = None
+        self.split_count = 1
         self.current_status_msg = "Status: Ready"
         
         self.needs_split = False
@@ -850,7 +859,8 @@ class AudioRecorderApp(QMainWindow):
             else:
                 time_str += f"{s} seconds. "
             
-            self.live_stats_lbl.setText(f"{time_str}{mb:.2f} MB Storage used on current recording.")
+            split_info = f" (Split {getattr(self, 'split_count', 1)})" if getattr(self, 'split_count', 1) > 1 else ""
+            self.live_stats_lbl.setText(f"{time_str}{mb:.2f} MB Storage used on current split{split_info}.")
         except Exception:
             pass
 
@@ -859,8 +869,12 @@ class AudioRecorderApp(QMainWindow):
             self.needs_split = True
 
     def on_split_completed(self):
-        self.notify("File Split", "Started a new recording file gaplessly.", "notify_split")
-        self.current_status_msg = f"Status: Recording to {os.path.basename(self.current_filename)}"
+        self.split_count = getattr(self, 'split_count', 1) + 1
+        msg = f"Split {self.split_count} started"
+        self.notify("File Split", msg, "notify_split")
+        if HAS_ACCESSIBILITY:
+            speaker.speak(msg)
+        self.current_status_msg = f"Status: Recording Split {self.split_count} to {os.path.basename(self.current_filename)}"
         self.update_dashboard_status()
         
     def force_stop_max_length(self):
@@ -1133,12 +1147,16 @@ class AudioRecorderApp(QMainWindow):
         self.is_paused = not self.is_paused
         if self.is_paused:
             self.play_sound("pause")
+            if HAS_ACCESSIBILITY:
+                speaker.speak("Recording paused")
             self.btn_pause.setText("R&esume")
-            self.current_status_msg = f"Status: Paused ({os.path.basename(self.current_filename)})"
+            self.current_status_msg = f"Status: Paused (Split {getattr(self, 'split_count', 1)})"
         else:
             self.play_sound("unpause")
+            if HAS_ACCESSIBILITY:
+                speaker.speak("Recording resumed")
             self.btn_pause.setText("&Pause")
-            self.current_status_msg = f"Status: Recording to {os.path.basename(self.current_filename)}"
+            self.current_status_msg = f"Status: Recording Split {getattr(self, 'split_count', 1)} to {os.path.basename(self.current_filename)}"
         self.update_dashboard_status()
 
     def start_recording(self):
@@ -1226,11 +1244,15 @@ class AudioRecorderApp(QMainWindow):
             if max_len > 0:
                 self.max_len_timer.start(max_len * 1000)
                 
-            self.live_stats_lbl.setText("Recording time, 0 seconds. 0.00 MB Storage used on current recording.")
+            self.live_stats_lbl.setText("Recording time, 0 seconds. 0.00 MB Storage used on current split.")
             self.live_stats_lbl.show()
             self.live_stats_timer.start(1000)
             
-            self.current_status_msg = f"Status: Recording to {os.path.basename(self.current_filename)}"
+            self.split_count = 1
+            if HAS_ACCESSIBILITY:
+                speaker.speak("Recording started")
+            
+            self.current_status_msg = f"Status: Recording Split {self.split_count} to {os.path.basename(self.current_filename)}"
             self.update_dashboard_status()
             
             self.play_sound("start")
@@ -1252,6 +1274,9 @@ class AudioRecorderApp(QMainWindow):
         self.max_len_timer.stop()
         self.live_stats_timer.stop()
         
+        if notify and HAS_ACCESSIBILITY:
+            speaker.speak("Recording stopped")
+            
         if self.record_thread_handle:
             self.record_thread_handle.join(timeout=0.1)
             self.record_thread_handle = None
