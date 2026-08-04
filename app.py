@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QFormLayout, QLineEdit, QDialog, QSpinBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
-from win10toast import ToastNotifier
+
 
 try:
     import updater

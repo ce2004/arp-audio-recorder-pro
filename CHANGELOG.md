@@ -2,6 +2,12 @@ Changelog
 
 All notable changes to ARP Audio Recorder Pro will be documented in this file.
 
+v1.0.12 - 2026-08-04
+Fixed:
+- Removed a leftover win10toast import statement that caused the compiled application to crash on startup.
+
+---
+
 v1.0.11 - 2026-08-04
 Changed:
 - Forced a minor version bump to verify that the auto-updater correctly prompts the user for new updates.
