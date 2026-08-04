@@ -22,7 +22,7 @@ def load_config():
         "sample_rate": "48000",
         "bit_depth": "24",
         "channels": "2",
-        "filename_prefix": "Recording",
+        "filename_prefix": "",
         "auto_split_secs": 0,
         "max_length_secs": 0,
         "group_splits": True,
@@ -74,31 +74,31 @@ class NotificationSettingsDialog(QDialog):
         
         self.chk_start_stop = QCheckBox("Notify on Start/Stop Recording")
         self.chk_start_stop.setChecked(self.config.get("notify_start_stop", True))
-        layout.addRow("", self.chk_start_stop)
+        layout.addRow(self.chk_start_stop)
         
         self.chk_split = QCheckBox("Notify on Auto-Split")
         self.chk_split.setChecked(self.config.get("notify_split", True))
-        layout.addRow("", self.chk_split)
+        layout.addRow(self.chk_split)
         
         self.chk_error = QCheckBox("Notify on recording errors")
         self.chk_error.setChecked(self.config.get("notify_error", True))
-        layout.addRow("", self.chk_error)
+        layout.addRow(self.chk_error)
         
         self.chk_drive = QCheckBox("Notify when output drive disconnects")
         self.chk_drive.setChecked(self.config.get("notify_drive_disconnect", True))
-        layout.addRow("", self.chk_drive)
+        layout.addRow(self.chk_drive)
         
         self.chk_mic_disc = QCheckBox("Notify on microphone disconnect")
         self.chk_mic_disc.setChecked(self.config.get("notify_mic_disconnect", True))
-        layout.addRow("", self.chk_mic_disc)
+        layout.addRow(self.chk_mic_disc)
         
         self.chk_confirm_exit = QCheckBox("Confirm exit while recording")
         self.chk_confirm_exit.setChecked(self.config.get("confirm_exit", True))
-        layout.addRow("", self.chk_confirm_exit)
+        layout.addRow(self.chk_confirm_exit)
         
         btn_save = QPushButton("Save && Close")
         btn_save.clicked.connect(self.save_and_close)
-        layout.addRow("", btn_save)
+        layout.addRow(btn_save)
         
     def save_and_close(self):
         self.config["notify_start_stop"] = self.chk_start_stop.isChecked()
@@ -120,19 +120,19 @@ class SoundSettingsDialog(QDialog):
         
         self.chk_snd_start = QCheckBox("Play sound on Start")
         self.chk_snd_start.setChecked(self.config.get("snd_start", True))
-        layout.addRow("", self.chk_snd_start)
+        layout.addRow(self.chk_snd_start)
         
         self.chk_snd_stop = QCheckBox("Play sound on Stop")
         self.chk_snd_stop.setChecked(self.config.get("snd_stop", True))
-        layout.addRow("", self.chk_snd_stop)
+        layout.addRow(self.chk_snd_stop)
         
         self.chk_snd_pause = QCheckBox("Play sound on Pause")
         self.chk_snd_pause.setChecked(self.config.get("snd_pause", True))
-        layout.addRow("", self.chk_snd_pause)
+        layout.addRow(self.chk_snd_pause)
         
         self.chk_snd_unpause = QCheckBox("Play sound on Unpause")
         self.chk_snd_unpause.setChecked(self.config.get("snd_unpause", True))
-        layout.addRow("", self.chk_snd_unpause)
+        layout.addRow(self.chk_snd_unpause)
         
         self.spin_volume = PercentageSpinBox()
         self.spin_volume.setRange(1, 100)
@@ -141,7 +141,7 @@ class SoundSettingsDialog(QDialog):
         
         btn_save = QPushButton("Save && Close")
         btn_save.clicked.connect(self.save_and_close)
-        layout.addRow("", btn_save)
+        layout.addRow(btn_save)
         
     def save_and_close(self):
         self.config["snd_start"] = self.chk_snd_start.isChecked()
@@ -243,11 +243,11 @@ class AudioMixerDialog(QDialog):
         
         self.chk_cont_mic = QCheckBox("Continue recording if a mic disconnects")
         self.chk_cont_mic.setChecked(self.config.get("continue_on_mic_disconnect", False))
-        layout.addRow("", self.chk_cont_mic)
+        layout.addRow(self.chk_cont_mic)
         
         btn_save = QPushButton("Save && Close")
         btn_save.clicked.connect(self.save_and_close)
-        layout.addRow("", btn_save)
+        layout.addRow(btn_save)
         
     def save_and_close(self):
         self.config["in1_route"] = self.cb_in1.currentText()
@@ -319,6 +319,15 @@ class TimeFormatSpinBox(QSpinBox):
         else:
             super().keyPressEvent(event)
 
+
+_old_btn_key_press = QPushButton.keyPressEvent
+def new_btn_key_press(self, event):
+    if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        self.click()
+        return
+    _old_btn_key_press(self, event)
+QPushButton.keyPressEvent = new_btn_key_press
+
 class SettingsDialog(QDialog):
     def __init__(self, parent, config, devices):
         super().__init__(parent)
@@ -343,12 +352,18 @@ class SettingsDialog(QDialog):
         dev_grp = QGroupBox("Audio Devices")
         dev_layout = QFormLayout()
         
+        self.cb_sort = QComboBox()
+        self.cb_sort.addItems(["Inputs First", "Outputs First"])
+        dev_layout.addRow("Device &Sort Order:", self.cb_sort)
+        
         self.device_cb = QComboBox()
         self.device2_cb = QComboBox()
         self.device2_cb.addItem("None", "none")
         
-        for d in self.devices:
-            prefix = "Output (Loopback): " if getattr(d, 'isloopback', False) else "Input (Mic): "
+        sort_order = self.config.get("device_sort_order", "Inputs First")
+        sorted_devices = sorted(self.devices, key=lambda d: (getattr(d, 'isloopback', False) if sort_order == "Inputs First" else not getattr(d, 'isloopback', False), d.name))
+        for d in sorted_devices:
+            prefix = "Output (Loopback): " if getattr(d, 'isloopback', False) else "Input: "
             self.device_cb.addItem(f"{prefix}{d.name}", d.id)
             self.device2_cb.addItem(f"{prefix}{d.name}", d.id)
             
@@ -415,7 +430,7 @@ class SettingsDialog(QDialog):
         file_form.addRow(pref_lbl, self.txt_prefix)
         
         self.chk_auto_start = QCheckBox("Auto-st&art recording on launch")
-        file_form.addRow("", self.chk_auto_start)
+        file_form.addRow(self.chk_auto_start)
         
         self.spin_delay = TimeFormatSpinBox()
         self.spin_delay.setRange(0, 3600)
@@ -439,7 +454,7 @@ class SettingsDialog(QDialog):
         file_form.addRow(split_lbl, self.spin_split)
         
         self.chk_group_splits = QCheckBox("Automatically place all splits into a unified folder")
-        file_form.addRow("", self.chk_group_splits)
+        file_form.addRow(self.chk_group_splits)
         
         file_grp.setLayout(file_form)
         layout.addWidget(file_grp)
@@ -456,19 +471,19 @@ class SettingsDialog(QDialog):
         
         self.chk_update_startup = QCheckBox("Check for &updates on startup")
         self.chk_update_startup.setChecked(self.config.get("check_updates_startup", True))
-        misc_form.addRow("", self.chk_update_startup)
+        misc_form.addRow(self.chk_update_startup)
         
         btn_notif = QPushButton("Configure Notifications")
         btn_notif.clicked.connect(self.open_notifications)
-        misc_form.addRow("", btn_notif)
+        misc_form.addRow(btn_notif)
         
         btn_sounds = QPushButton("Configure Sounds")
         btn_sounds.clicked.connect(self.open_sounds)
-        misc_form.addRow("", btn_sounds)
+        misc_form.addRow(btn_sounds)
         
         btn_mixer = QPushButton("Configure Audio Channels")
         btn_mixer.clicked.connect(self.open_mixer)
-        misc_form.addRow("", btn_mixer)
+        misc_form.addRow(btn_mixer)
         
         misc_grp.setLayout(misc_form)
         layout.addWidget(misc_grp)
@@ -519,7 +534,8 @@ class SettingsDialog(QDialog):
     def apply_config(self):
         self.update_folder_label(self.config["save_folder"])
         self.chk_auto_start.setChecked(self.config["auto_start"])
-        self.txt_prefix.setText(self.config.get("filename_prefix", "Recording"))
+        self.cb_sort.setCurrentText(self.config.get("device_sort_order", "Inputs First"))
+        self.txt_prefix.setText(self.config.get("filename_prefix", ""))
         
         self.spin_delay.setValue(self.config.get("auto_start_delay", 0))
         self.spin_split.setValue(self.config.get("auto_split_secs", 0))
@@ -587,6 +603,7 @@ class SettingsDialog(QDialog):
         self.config["check_updates_startup"] = self.chk_update_startup.isChecked()
         
         self.config["save_folder"] = self.txt_folder.text()
+        self.config["device_sort_order"] = self.cb_sort.currentText()
             
         save_config(self.config)
         self.accept()
@@ -1066,7 +1083,7 @@ class AudioRecorderApp(QMainWindow):
                                 break
                             
                             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                            base_filename = os.path.join(self.current_session_folder, f"{prefix}_{timestamp}")
+                            base_filename = os.path.join(self.current_session_folder, f"{prefix}_{timestamp}" if prefix else timestamp)
                             self.current_filename = f"{base_filename}.wav"
                             counter = 1
                             while os.path.exists(self.current_filename):
@@ -1150,8 +1167,8 @@ class AudioRecorderApp(QMainWindow):
         subtype_map = {16: 'PCM_16', 24: 'PCM_24', 32: 'PCM_32'}
         subtype = subtype_map[bd]
         
-        prefix = self.config.get("filename_prefix", "Recording").strip()
-        if not prefix: prefix = "Recording"
+        prefix = self.config.get("filename_prefix", "").strip()
+        
         prefix = re.sub(r'[\\/*?:"<>|]', "", prefix)
         
         split_secs = self.config.get("auto_split_secs", 0)
@@ -1159,14 +1176,14 @@ class AudioRecorderApp(QMainWindow):
         try:
             if self.config.get("group_splits", True) and split_secs > 0:
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                self.current_session_folder = os.path.join(self.config["save_folder"], f"{prefix}_{timestamp}")
+                self.current_session_folder = os.path.join(self.config["save_folder"], f"{prefix}_{timestamp}" if prefix else timestamp)
                 os.makedirs(self.current_session_folder, exist_ok=True)
             else:
                 self.current_session_folder = self.config["save_folder"]
                 os.makedirs(self.current_session_folder, exist_ok=True)
             
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            base_filename = os.path.join(self.current_session_folder, f"{prefix}_{timestamp}")
+            base_filename = os.path.join(self.current_session_folder, f"{prefix}_{timestamp}" if prefix else timestamp)
             self.current_filename = f"{base_filename}.wav"
             counter = 1
             while os.path.exists(self.current_filename):

@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.15"
+CURRENT_VERSION = "v1.0.16"
 
 # Globals for download tracking
 stop_beeping = False
@@ -67,6 +67,15 @@ def announce_progress(e=None):
     
     text = f"{pct} percent, {mb_s} megabytes per second. {dl_mb} of {tot_mb} megabytes. {current_eta_s} seconds remaining."
     speaker.speak(text, interrupt=True)
+
+
+    _old_btn_key_press = QPushButton.keyPressEvent
+    def new_btn_key_press(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.click()
+            return
+        _old_btn_key_press(self, event)
+    QPushButton.keyPressEvent = new_btn_key_press
 
 class UpdateDialog(QDialog):
     def __init__(self, current_ver, new_ver, release_notes):
