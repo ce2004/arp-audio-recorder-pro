@@ -345,6 +345,7 @@ class SettingsDialog(QDialog):
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         scroll_widget = QWidget()
         layout = QVBoxLayout(scroll_widget)
         
@@ -469,9 +470,13 @@ class SettingsDialog(QDialog):
         title_lbl.setBuddy(self.txt_title)
         misc_form.addRow(title_lbl, self.txt_title)
         
-        self.chk_update_startup = QCheckBox("Check for &updates on startup")
+                self.chk_update_startup = QCheckBox("Check for &updates on startup")
         self.chk_update_startup.setChecked(self.config.get("check_updates_startup", True))
         misc_form.addRow(self.chk_update_startup)
+        
+        btn_check_updates = QPushButton("Check for &Updates Now")
+        btn_check_updates.clicked.connect(self.manual_update_check)
+        misc_form.addRow(btn_check_updates)
         
         btn_notif = QPushButton("Configure Notifications")
         btn_notif.clicked.connect(self.open_notifications)
@@ -497,6 +502,14 @@ class SettingsDialog(QDialog):
         btn_save.clicked.connect(self.save_and_close)
         btn_layout.addWidget(btn_save)
         main_layout.addLayout(btn_layout)
+
+
+    def manual_update_check(self):
+        try:
+            import updater
+            updater.run_auto_updater(manual=True)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to check for updates: {e}")
 
     def open_notifications(self):
         dlg = NotificationSettingsDialog(self, self.config)
@@ -1240,7 +1253,7 @@ class AudioRecorderApp(QMainWindow):
         self.live_stats_timer.stop()
         
         if self.record_thread_handle:
-            self.record_thread_handle.join(timeout=1.0)
+            self.record_thread_handle.join(timeout=0.1)
             self.record_thread_handle = None
             
         self.btn_toggle_record.setText("&Start Recording")
@@ -1280,7 +1293,7 @@ class AudioRecorderApp(QMainWindow):
         self.stop_recording(notify=True)
         if hasattr(self, 'drive_thread'):
             self.drive_thread.stop()
-            self.drive_thread.wait()
+            self.drive_thread.wait(100)
         event.accept()
 
 if __name__ == "__main__":

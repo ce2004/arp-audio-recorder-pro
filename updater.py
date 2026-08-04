@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.16"
+CURRENT_VERSION = "v1.0.17"
 
 # Globals for download tracking
 stop_beeping = False
@@ -253,7 +253,7 @@ def apply_update(download_url):
         stop_beeping = True
         if HAS_ACCESSIBILITY: keyboard.unhook_all()
 
-def run_auto_updater():
+def run_auto_updater(manual=False):
     cleanup_old_updates()
     version, url, notes = check_for_updates()
     if url:
@@ -265,6 +265,12 @@ def run_auto_updater():
         dialog = UpdateDialog(CURRENT_VERSION, version, notes)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             apply_update(url)
+    elif manual:
+        app = QApplication.instance()
+        if not app:
+            app = QApplication(sys.argv)
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(None, "Up to Date", "You are already on the latest version!")
 
 if __name__ == "__main__":
     run_auto_updater()
