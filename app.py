@@ -45,6 +45,7 @@ def load_config():
         "notify_error": True,
         "notify_drive_disconnect": True,
         "notify_mic_disconnect": True,
+        "speak_in_focus_only": False,
         "continue_on_mic_disconnect": False,
         "confirm_exit": True,
         "check_updates_startup": True,
@@ -104,6 +105,10 @@ class NotificationSettingsDialog(QDialog):
         self.chk_confirm_exit.setChecked(self.config.get("confirm_exit", True))
         layout.addRow(self.chk_confirm_exit)
         
+        self.chk_focus_speak = QCheckBox("Speak announcements only when window is in focus")
+        self.chk_focus_speak.setChecked(self.config.get("speak_in_focus_only", False))
+        layout.addRow(self.chk_focus_speak)
+        
         btn_save = QPushButton("Save && Close")
         btn_save.clicked.connect(self.save_and_close)
         layout.addRow(btn_save)
@@ -114,6 +119,7 @@ class NotificationSettingsDialog(QDialog):
         self.config["notify_error"] = self.chk_error.isChecked()
         self.config["notify_drive_disconnect"] = self.chk_drive.isChecked()
         self.config["notify_mic_disconnect"] = self.chk_mic_disc.isChecked()
+        self.config["speak_in_focus_only"] = self.chk_focus_speak.isChecked()
         self.config["confirm_exit"] = self.chk_confirm_exit.isChecked()
         save_config(self.config)
         self.accept()
@@ -866,6 +872,16 @@ class AudioRecorderApp(QMainWindow):
         except Exception:
             pass
 
+    def speak(self, msg):
+        if not HAS_ACCESSIBILITY: return
+        if self.config.get("speak_in_focus_only", False):
+            if not self.isActiveWindow():
+                return
+        try:
+            speaker.speak(msg)
+        except Exception:
+            pass
+
     def do_auto_split(self):
         if self.is_recording:
             self.needs_split = True
@@ -874,8 +890,7 @@ class AudioRecorderApp(QMainWindow):
         self.split_count = getattr(self, 'split_count', 1) + 1
         msg = f"Split {self.split_count} started"
         self.notify("File Split", msg, "notify_split")
-        if HAS_ACCESSIBILITY:
-            speaker.speak(msg)
+        self.speak(msg)
         self.current_status_msg = f"Status: Recording Split {self.split_count} to {os.path.basename(self.current_filename)}"
         self.update_dashboard_status()
         
@@ -1149,14 +1164,12 @@ class AudioRecorderApp(QMainWindow):
         self.is_paused = not self.is_paused
         if self.is_paused:
             self.play_sound("pause")
-            if HAS_ACCESSIBILITY:
-                speaker.speak("Recording paused")
+            self.speak("Recording paused")
             self.btn_pause.setText("R&esume")
             self.current_status_msg = f"Status: Paused (Split {getattr(self, 'split_count', 1)})"
         else:
             self.play_sound("unpause")
-            if HAS_ACCESSIBILITY:
-                speaker.speak("Recording resumed")
+            self.speak("Recording resumed")
             self.btn_pause.setText("&Pause")
             self.current_status_msg = f"Status: Recording Split {getattr(self, 'split_count', 1)} to {os.path.basename(self.current_filename)}"
         self.update_dashboard_status()
@@ -1251,8 +1264,7 @@ class AudioRecorderApp(QMainWindow):
             self.live_stats_timer.start(1000)
             
             self.split_count = 1
-            if HAS_ACCESSIBILITY:
-                speaker.speak("Recording started")
+            self.speak("Recording started")
             
             self.current_status_msg = f"Status: Recording Split {self.split_count} to {os.path.basename(self.current_filename)}"
             self.update_dashboard_status()
@@ -1276,8 +1288,8 @@ class AudioRecorderApp(QMainWindow):
         self.max_len_timer.stop()
         self.live_stats_timer.stop()
         
-        if notify and HAS_ACCESSIBILITY:
-            speaker.speak("Recording stopped")
+        if notify:
+            self.speak("Recording stopped")
             
         if self.record_thread_handle:
             self.record_thread_handle.join(timeout=0.1)

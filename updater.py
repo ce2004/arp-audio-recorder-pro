@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.20"
+CURRENT_VERSION = "v1.0.21"
 
 # Globals for download tracking
 stop_beeping = False
