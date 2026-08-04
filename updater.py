@@ -6,7 +6,7 @@ import subprocess
 
 # We will set this to your GitHub username and repository later
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.0"
+CURRENT_VERSION = "v1.0.2"
 
 def check_for_updates():
     try:
