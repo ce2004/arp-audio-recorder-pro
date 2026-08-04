@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.6"
+CURRENT_VERSION = "v1.0.7"
 
 # Globals for download tracking
 stop_beeping = False
@@ -146,6 +146,7 @@ def apply_update(download_url):
         print(f"Downloading update from {download_url}...")
         
         if HAS_ACCESSIBILITY:
+            speaker.speak("Press space for progress.", interrupt=True)
             keyboard.on_press_key("space", announce_progress)
             beep_thread = threading.Thread(target=beep_loop, daemon=True)
             beep_thread.start()

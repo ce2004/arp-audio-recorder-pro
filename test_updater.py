@@ -102,7 +102,7 @@ def test_download():
     global current_progress, current_speed_kb, current_eta_s, stop_beeping, current_downloaded_bytes, current_total_bytes
     
     print("Starting test download... Press SPACE to hear progress!")
-    speaker.speak("Starting test download. Press space to hear progress.")
+    speaker.speak("Press space for progress.", interrupt=True)
     
     test_url = "https://www.python.org/ftp/python/3.11.5/python-3.11.5-amd64.exe"
     
