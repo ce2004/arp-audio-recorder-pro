@@ -1133,14 +1133,14 @@ class AudioRecorderApp(QMainWindow):
                         time.sleep(0.01)
                         if not t1.is_alive() and not mic1_failed:
                             mic1_failed = True
-                            will_continue = continue_on_disc and (mic2 and not mic2_failed)
+                            will_continue = bool(continue_on_disc and mic2 and not mic2_failed)
                             self.mic_disconnected_signal.emit(1, will_continue)
                             if not will_continue:
                                 abort_recording = True
                                 break
                         if mic2 and not t2.is_alive() and not mic2_failed:
                             mic2_failed = True
-                            will_continue = continue_on_disc and not mic1_failed
+                            will_continue = bool(continue_on_disc and not mic1_failed)
                             self.mic_disconnected_signal.emit(2, will_continue)
                             if not will_continue:
                                 abort_recording = True
