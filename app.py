@@ -5,6 +5,18 @@ import datetime
 import time
 import json
 import re
+import logging
+import platform
+
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arp_diagnostic.log")
+logging.basicConfig(
+    filename=LOG_FILE,
+    filemode='w',
+    level=logging.INFO,
+    format='%(asctime)s - %(threadName)s - %(levelname)s - %(message)s'
+)
+logging.info(f"App started. OS: {platform.system()} {platform.release()}")
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QGroupBox, QFileDialog, QMessageBox,
@@ -575,6 +587,10 @@ class SettingsDialog(QDialog):
         btn_mixer.clicked.connect(self.open_mixer)
         misc_form.addRow(btn_mixer)
         
+        btn_copy_logs = QPushButton("Copy Diagnostic Logs")
+        btn_copy_logs.clicked.connect(self.copy_logs)
+        misc_form.addRow(btn_copy_logs)
+        
         misc_grp.setLayout(misc_form)
         layout.addWidget(misc_grp)
         
@@ -592,9 +608,20 @@ class SettingsDialog(QDialog):
     def manual_update_check(self):
         try:
             import updater
+            logging.info("Manual update check triggered")
             updater.run_auto_updater(manual=True)
         except Exception as e:
+            logging.error(f"Failed to check for updates: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to check for updates: {e}")
+
+    def copy_logs(self):
+        try:
+            with open(LOG_FILE, 'r', encoding='utf-8') as f:
+                logs = f.read()
+            QApplication.clipboard().setText(logs)
+            QMessageBox.information(self, "Logs Copied", "Diagnostic logs have been copied to your clipboard!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to copy logs: {e}")
 
     def open_notifications(self):
         dlg = NotificationSettingsDialog(self, self.config)
@@ -1117,11 +1144,14 @@ class AudioRecorderApp(QMainWindow):
                             except queue.Full:
                                 session.dropped_blocks += 1
                 except Exception as e:
+                    logging.error(f"Reader error: {e}", exc_info=True)
                     print(f"Reader error: {e}")
                     try:
                         ready_barrier.abort()
                     except:
                         pass
+                finally:
+                    logging.info("Reader thread shutting down")
 
             q1 = queue.Queue(maxsize=100)
             t1 = threading.Thread(target=reader_thread, args=(mic1, q1), daemon=True)
@@ -1164,6 +1194,7 @@ class AudioRecorderApp(QMainWindow):
                     if s1 == 0 and s2 == 0:
                         time.sleep(0.01)
                         if not t1.is_alive() and not mic1_failed:
+                            logging.warning("Mic 1 thread died unexpectedly")
                             mic1_failed = True
                             will_continue = bool(continue_on_disc and mic2 and not mic2_failed)
                             self.mic_disconnected_signal.emit(1, will_continue)
@@ -1253,7 +1284,12 @@ class AudioRecorderApp(QMainWindow):
                                 self.current_filename = f"{base_filename}_{counter}.wav"
                                 counter += 1
                             
-                            file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype, format='WAVEX')
+                            try:
+                                file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype, format='WAVEX')
+                                logging.info(f"Successfully opened next split file: {self.current_filename}")
+                            except Exception as e:
+                                logging.error(f"Failed to open next split file: {e}", exc_info=True)
+                                self.error_signal.emit(f"Failed to open next split file: {e}")
                             self.total_frames_written = 0
                             self.split_signal.emit()
             finally:
@@ -1368,6 +1404,11 @@ class AudioRecorderApp(QMainWindow):
             self.btn_pause.setText("&Pause")
             self.btn_settings.setEnabled(False)
             
+            logging.info(f"Starting recording session: {session_id}")
+            logging.info(f"Sample Rate: {sr}, Channels: {ch}, Bits: {bd}, Buffer: {buf_size}")
+            if mic1: logging.info(f"Mic 1: {mic1.id}")
+            if mic2: logging.info(f"Mic 2: {mic2.id}")
+            
             self.needs_split = False
             self.record_thread_handle = threading.Thread(
                 target=self.record_audio_worker, 
@@ -1420,6 +1461,7 @@ class AudioRecorderApp(QMainWindow):
         self.shutting_down = True
         
         if self.current_session:
+            logging.info(f"Stop event set for session: {self.current_session.session_id}")
             self.current_session.stop_event.set()
         
         self.notify_on_stop = notify
