@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.36"
+CURRENT_VERSION = "v1.0.37"
 
 # Globals for download tracking
 stop_beeping = False
@@ -173,32 +173,41 @@ def cleanup_old_updates():
     app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
     import shutil
     import re
+    import time
     
-    try:
-        for item in os.listdir(app_dir):
-            if re.search(r'\.old_[a-f0-9]{8}$', item):
-                path = os.path.join(app_dir, item)
-                try:
-                    if os.path.isdir(path): shutil.rmtree(path, ignore_errors=True)
-                    else: os.remove(path)
-                except:
-                    pass
-    except: pass
+    for _ in range(5):
+        all_clean = True
+        
+        try:
+            for item in os.listdir(app_dir):
+                if re.search(r'\.old_[a-f0-9]{8}$', item):
+                    path = os.path.join(app_dir, item)
+                    try:
+                        if os.path.isdir(path): shutil.rmtree(path, ignore_errors=True)
+                        else: os.remove(path)
+                    except: pass
+                    if os.path.exists(path): all_clean = False
+        except: all_clean = False
 
-    try:
-        temp_zip = os.path.join(app_dir, "update.zip")
-        if os.path.exists(temp_zip): os.remove(temp_zip)
-    except: pass
-    
-    try:
-        extract_dir = os.path.join(app_dir, "update_extract")
-        if os.path.exists(extract_dir): shutil.rmtree(extract_dir, ignore_errors=True)
-    except: pass
+        try:
+            temp_zip = os.path.join(app_dir, "update.zip")
+            if os.path.exists(temp_zip): os.remove(temp_zip)
+        except: all_clean = False
+        
+        try:
+            extract_dir = os.path.join(app_dir, "update_extract")
+            if os.path.exists(extract_dir): shutil.rmtree(extract_dir, ignore_errors=True)
+            if os.path.exists(extract_dir): all_clean = False
+        except: all_clean = False
 
-    try:
-        cleanup_file = os.path.join(app_dir, ".update_cleanup")
-        if os.path.exists(cleanup_file): os.remove(cleanup_file)
-    except: pass
+        try:
+            cleanup_file = os.path.join(app_dir, ".update_cleanup")
+            if os.path.exists(cleanup_file): os.remove(cleanup_file)
+        except: all_clean = False
+        
+        if all_clean:
+            break
+        time.sleep(0.5)
 
 def apply_update(download_url, sha_url):
     global current_progress, current_speed_kb, current_eta_s, stop_beeping, current_downloaded_bytes, current_total_bytes
