@@ -288,6 +288,24 @@ class AutoResumeThread(QThread):
     def stop(self):
         self.is_running = False
 
+class RecordingSession:
+    def __init__(self, session_id):
+        self.session_id = session_id
+        self.stop_event = threading.Event()
+        self.dropped_blocks = 0
+        self.silence_blocks = 0
+        self.file_splits = 0
+        self.current_filename = None
+        self.error_state = None
+        self.queues = []
+        self.reader_threads = []
+        self.writer_thread = None
+        self.start_time = time.time()
+        self.stop_time = None
+        self.finalization_status = "Recording"
+        self.needs_split = False
+        self.is_paused = False
+
 class AudioMixerDialog(QDialog):
     def __init__(self, parent, config):
         super().__init__(parent)
@@ -701,13 +719,18 @@ class AudioRecorderApp(QMainWindow):
         
         self.is_recording = False
         self.is_paused = False
+        
         self.devices = []
+        self.current_session = None
+        self.shutting_down = False
         self.record_thread_handle = None
         self.current_filename = None
         self.current_session_folder = None
         self.split_count = 1
         self.current_status_msg = "Status: Ready"
         
+        self.shutdown_poll_timer = QTimer(self)
+        self.shutdown_poll_timer.timeout.connect(self.poll_session_shutdown)
         self.needs_split = False
         self.split_timer = QTimer(self)
         self.split_timer.timeout.connect(self.do_auto_split)
@@ -1037,7 +1060,7 @@ class AudioRecorderApp(QMainWindow):
             
         self.start_recording()
 
-    def record_audio_worker(self, mic1, mic2, sr, ch, subtype, buf_size, prefix):
+    def record_audio_worker(self, session, mic1, mic2, sr, ch, subtype, buf_size, prefix, base_filename):
         file = None
         try:
             import soundfile as sf
@@ -1072,10 +1095,10 @@ class AudioRecorderApp(QMainWindow):
                         out[:, 1] = data[:, 0]
                 return out
                 
-            file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype)
+            file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype, format='WAVEX')
             
             is_active = True
-            def check_active(): return self.is_recording and is_active
+            def check_active(): return not session.stop_event.is_set() and is_active
 
             num_readers = 2 if mic2 else 1
             ready_barrier = threading.Barrier(num_readers + 1)
@@ -1092,7 +1115,7 @@ class AudioRecorderApp(QMainWindow):
                             try:
                                 out_q.put((time.time(), data), timeout=1.0)
                             except queue.Full:
-                                pass
+                                session.dropped_blocks += 1
                 except Exception as e:
                     print(f"Reader error: {e}")
                     try:
@@ -1131,7 +1154,7 @@ class AudioRecorderApp(QMainWindow):
                 mic1_silent = False
                 mic2_silent = False
                 
-                while self.is_recording and not abort_recording:
+                while not session.stop_event.is_set() and not abort_recording:
                     s1 = q1.qsize()
                     s2 = q2.qsize() if mic2 else 0
                     
@@ -1170,6 +1193,7 @@ class AudioRecorderApp(QMainWindow):
                         mic1_silent = True
                         ts1 = time.time()
                         data1 = np.zeros((buf_size, 2), dtype=np.float32)
+                        session.silence_blocks += 1
                         
                     data2 = None
                     if mic2:
@@ -1185,6 +1209,7 @@ class AudioRecorderApp(QMainWindow):
                             except queue.Empty:
                                 mic2_silent = True
                                 data2 = np.zeros_like(data1)
+                                session.silence_blocks += 1
                                 break
                                 
                     last_frame_time = time.time()
@@ -1228,7 +1253,7 @@ class AudioRecorderApp(QMainWindow):
                                 self.current_filename = f"{base_filename}_{counter}.wav"
                                 counter += 1
                             
-                            file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype)
+                            file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype, format='WAVEX')
                             self.total_frames_written = 0
                             self.split_signal.emit()
             finally:
@@ -1269,7 +1294,7 @@ class AudioRecorderApp(QMainWindow):
         self.update_dashboard_status()
 
     def start_recording(self):
-        if self.is_recording: return
+        if self.is_recording or self.shutting_down: return
         
         folder = self.config.get("save_folder", "")
         if not folder:
@@ -1322,12 +1347,17 @@ class AudioRecorderApp(QMainWindow):
                 self.current_session_folder = self.config["save_folder"]
                 os.makedirs(self.current_session_folder, exist_ok=True)
             
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            base_filename = os.path.join(self.current_session_folder, f"{prefix}_{timestamp}" if prefix else timestamp)
-            self.current_filename = f"{base_filename}.wav"
+            session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.current_session = RecordingSession(session_id)
+            self.current_session.split_count = 1
+            
+            base_filename = os.path.join(self.current_session_folder, f"{prefix}_{session_id}" if prefix else session_id)
+            part_str = f"_part{self.current_session.split_count:04d}"
+            self.current_filename = f"{base_filename}{part_str}.wav"
+            
             counter = 1
             while os.path.exists(self.current_filename):
-                self.current_filename = f"{base_filename}_{counter}.wav"
+                self.current_filename = f"{base_filename}_{counter}{part_str}.wav"
                 counter += 1
             
             self.is_recording = True
@@ -1341,7 +1371,7 @@ class AudioRecorderApp(QMainWindow):
             self.needs_split = False
             self.record_thread_handle = threading.Thread(
                 target=self.record_audio_worker, 
-                args=(mic1, mic2, sr, ch, subtype, buf_size, prefix),
+                args=(self.current_session, mic1, mic2, sr, ch, subtype, buf_size, prefix, base_filename),
                 daemon=True
             )
             self.record_thread_handle.start()
@@ -1374,7 +1404,7 @@ class AudioRecorderApp(QMainWindow):
             QMessageBox.critical(self, "Audio Error", f"Failed to start recording.\n\nError: {e}")
 
     def stop_recording(self, notify=True):
-        if not self.is_recording: return
+        if not self.is_recording and not self.shutting_down: return
         self.is_recording = False
         self.is_paused = False
         self.needs_split = False
@@ -1382,15 +1412,32 @@ class AudioRecorderApp(QMainWindow):
         self.max_len_timer.stop()
         self.live_stats_timer.stop()
         
-        if notify:
+        self.btn_toggle_record.setEnabled(False)
+        self.btn_pause.setEnabled(False)
+        self.btn_settings.setEnabled(False)
+        self.current_status_msg = "Status: Stopping and finalizing recording..."
+        self.update_dashboard_status()
+        self.shutting_down = True
+        
+        if self.current_session:
+            self.current_session.stop_event.set()
+        
+        self.notify_on_stop = notify
+        self.shutdown_poll_timer.start(100)
+        
+    def poll_session_shutdown(self):
+        if self.record_thread_handle and self.record_thread_handle.is_alive():
+            return
+            
+        self.shutdown_poll_timer.stop()
+        self.shutting_down = False
+        self.record_thread_handle = None
+        
+        if self.notify_on_stop:
             self.speak("Recording stopped")
             
-        if self.record_thread_handle:
-            self.record_thread_handle.join(timeout=0.1)
-            self.record_thread_handle = None
-            
         self.btn_toggle_record.setText("&Start Recording")
-        self.btn_pause.setEnabled(False)
+        self.btn_toggle_record.setEnabled(True)
         self.btn_pause.setText("&Pause")
         self.btn_settings.setEnabled(True)
         self.live_stats_lbl.hide()
@@ -1398,11 +1445,18 @@ class AudioRecorderApp(QMainWindow):
         self.current_status_msg = "Status: Ready"
         self.update_dashboard_status()
         self.play_sound("stop")
-        
         self.current_session_folder = None
         
-        if notify:
-            self.notify("Recording Saved", "File safely saved to disk!", "notify_start_stop")
+        if self.notify_on_stop and self.current_session:
+            dropped = self.current_session.dropped_blocks
+            silence = self.current_session.silence_blocks
+            msg = "File safely saved to disk!"
+            if dropped > 0 or silence > 0:
+                msg += f"\n\nQuality Warning: {dropped} blocks dropped, {silence} silence blocks substituted."
+                self.speak("Recording saved with quality warnings.")
+            else:
+                self.speak("Recording saved successfully.")
+            self.notify("Recording Saved", msg, "notify_start_stop")
 
     def closeEvent(self, event):
         if self.is_recording and self.config.get("confirm_exit", True):
