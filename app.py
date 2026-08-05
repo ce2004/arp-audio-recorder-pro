@@ -968,8 +968,11 @@ class AudioRecorderApp(QMainWindow):
             else:
                 time_str += f"{s} seconds. "
             
-            split_info = f" (Split {getattr(self, 'split_count', 1)})" if getattr(self, 'split_count', 1) > 1 else ""
-            self.live_stats_lbl.setText(f"{time_str}{mb:.2f} MB Storage used on current split{split_info}.")
+            if self.config.get("auto_split_secs", 0) > 0:
+                split_info = f" (Split {getattr(self, 'split_count', 1)})" if getattr(self, 'split_count', 1) > 1 else ""
+                self.live_stats_lbl.setText(f"{time_str}{mb:.2f} MB Storage used on current split{split_info}.")
+            else:
+                self.live_stats_lbl.setText(f"{time_str}{mb:.2f} MB Storage used.")
         except Exception:
             pass
 
@@ -1321,12 +1324,18 @@ class AudioRecorderApp(QMainWindow):
             self.play_sound("pause")
             self.speak("Recording paused")
             self.btn_pause.setText("R&esume")
-            self.current_status_msg = f"Status: Paused (Split {getattr(self, 'split_count', 1)})"
+            if self.config.get("auto_split_secs", 0) > 0:
+                self.current_status_msg = f"Status: Paused (Split {getattr(self, 'split_count', 1)})"
+            else:
+                self.current_status_msg = "Status: Paused"
         else:
             self.play_sound("unpause")
             self.speak("Recording resumed")
             self.btn_pause.setText("&Pause")
-            self.current_status_msg = f"Status: Recording Split {getattr(self, 'split_count', 1)} to {os.path.basename(self.current_filename)}"
+            if self.config.get("auto_split_secs", 0) > 0:
+                self.current_status_msg = f"Status: Recording Split {getattr(self, 'split_count', 1)} to {os.path.basename(self.current_filename)}"
+            else:
+                self.current_status_msg = f"Status: Recording to {os.path.basename(self.current_filename)}"
         self.update_dashboard_status()
 
     def start_recording(self):
@@ -1388,7 +1397,7 @@ class AudioRecorderApp(QMainWindow):
             self.current_session.split_count = 1
             
             base_filename = os.path.join(self.current_session_folder, f"{prefix}_{session_id}" if prefix else session_id)
-            part_str = f"_part{self.current_session.split_count:04d}"
+            part_str = f"_part{self.current_session.split_count:04d}" if split_secs > 0 else ""
             self.current_filename = f"{base_filename}{part_str}.wav"
             
             counter = 1
@@ -1424,14 +1433,20 @@ class AudioRecorderApp(QMainWindow):
             if max_len > 0:
                 self.max_len_timer.start(max_len * 1000)
                 
-            self.live_stats_lbl.setText("Recording time, 0 seconds. 0.00 MB Storage used on current split.")
+            if split_secs > 0:
+                self.live_stats_lbl.setText("Recording time, 0 seconds. 0.00 MB Storage used on current split.")
+            else:
+                self.live_stats_lbl.setText("Recording time, 0 seconds. 0.00 MB Storage used.")
             self.live_stats_lbl.show()
             self.live_stats_timer.start(1000)
             
             self.split_count = 1
             self.speak("Recording started")
             
-            self.current_status_msg = f"Status: Recording Split {self.split_count} to {os.path.basename(self.current_filename)}"
+            if split_secs > 0:
+                self.current_status_msg = f"Status: Recording Split {self.split_count} to {os.path.basename(self.current_filename)}"
+            else:
+                self.current_status_msg = f"Status: Recording to {os.path.basename(self.current_filename)}"
             self.update_dashboard_status()
             
             self.play_sound("start")
