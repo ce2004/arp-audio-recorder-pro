@@ -244,13 +244,14 @@ class DriveMonitorThread(QThread):
         self.is_running = False
 
 class AutoResumeThread(QThread):
-    resume_signal = pyqtSignal()
+    resume_signal = pyqtSignal(str)
     
-    def __init__(self, folder, mic1_id, mic2_id):
+    def __init__(self, folder, mic1_id, mic2_id, missing):
         super().__init__()
         self.folder = folder
         self.mic1_id = mic1_id
         self.mic2_id = mic2_id
+        self.missing = missing
         self.is_running = True
         
     def run(self):
@@ -279,7 +280,7 @@ class AutoResumeThread(QThread):
                     pass
                     
             if drive_ok and mic1_ok and mic2_ok:
-                self.resume_signal.emit()
+                self.resume_signal.emit(self.missing)
                 break
                 
             time.sleep(1.0)
@@ -964,8 +965,8 @@ class AudioRecorderApp(QMainWindow):
             self.notify("Drive Disconnected", msg, "notify_drive_disconnect")
             
         if was_recording and self.config.get("auto_resume_unattended", False):
-            self.start_auto_resume_thread()
-            msg = "Waiting for drive and microphones to reconnect before resuming..."
+            self.start_auto_resume_thread("drive")
+            msg = "Waiting for output drive to reconnect before resuming..."
             self.speak(msg)
             self.current_status_msg = f"Status: Error - {msg}"
             self.update_dashboard_status()
@@ -1003,8 +1004,8 @@ class AudioRecorderApp(QMainWindow):
             self.notify("Microphone Disconnected", msg, "notify_mic_disconnect")
             
             if self.config.get("auto_resume_unattended", False):
-                self.start_auto_resume_thread()
-                msg = "Waiting for microphones and drive to reconnect before resuming..."
+                self.start_auto_resume_thread("mic")
+                msg = "Waiting for microphone to reconnect before resuming..."
                 self.speak(msg)
                 self.current_status_msg = f"Status: Error - {msg}"
                 self.update_dashboard_status()
@@ -1012,20 +1013,28 @@ class AudioRecorderApp(QMainWindow):
                 
             QMessageBox.critical(self, "Microphone Disconnected", msg)
 
-    def start_auto_resume_thread(self):
+    def start_auto_resume_thread(self, missing):
         if getattr(self, 'auto_resume_thread', None) and self.auto_resume_thread.is_running:
+            self.auto_resume_thread.missing = "both"
             return
         folder = self.config.get("save_folder", "")
         mic1_id = self.config.get("device_id", "")
         mic2_id = self.config.get("device2_id", "none")
-        self.auto_resume_thread = AutoResumeThread(folder, mic1_id, mic2_id)
+        self.auto_resume_thread = AutoResumeThread(folder, mic1_id, mic2_id, missing)
         self.auto_resume_thread.resume_signal.connect(self.handle_auto_resume)
         self.auto_resume_thread.start()
         
-    def handle_auto_resume(self):
+    def handle_auto_resume(self, missing):
         if getattr(self, 'auto_resume_thread', None):
             self.auto_resume_thread.stop()
-        self.speak("Devices found. Recording again after error.")
+            
+        if missing == "drive":
+            self.speak("Output drive found. Recording again after error.")
+        elif missing == "mic":
+            self.speak("Microphone found. Recording again after error.")
+        else:
+            self.speak("Devices found. Recording again after error.")
+            
         self.start_recording()
 
     def record_audio_worker(self, mic1, mic2, sr, ch, subtype, buf_size, prefix):
