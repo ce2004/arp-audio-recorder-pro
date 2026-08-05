@@ -450,7 +450,7 @@ class SettingsDialog(QDialog):
         file_form.addRow(self.chk_auto_start)
         
         self.spin_delay = TimeFormatSpinBox()
-        self.spin_delay.setRange(1, 3600)
+        self.spin_delay.setRange(0, 3600)
         
         delay_lbl = QLabel("Start De&lay:")
         delay_lbl.setBuddy(self.spin_delay)
