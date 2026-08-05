@@ -7,6 +7,11 @@ import json
 import re
 import logging
 import platform
+import queue
+import shutil
+import numpy as np
+import soundfile as sf
+import soundcard as sc
 
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arp_diagnostic.log")
 logging.basicConfig(
@@ -267,7 +272,6 @@ class AutoResumeThread(QThread):
         self.is_running = True
         
     def run(self):
-        import soundcard as sc
         while self.is_running:
             drive_ok = True
             if self.folder:
@@ -853,7 +857,6 @@ class AudioRecorderApp(QMainWindow):
     def populate_devices(self):
         self.devices = []
         try:
-            import soundcard as sc
             self.devices = sc.all_microphones(include_loopback=True)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not enumerate audio devices: {e}")
@@ -1093,9 +1096,6 @@ class AudioRecorderApp(QMainWindow):
     def record_audio_worker(self, session, mic1, mic2, sr, ch, subtype, buf_size, prefix, base_filename):
         file = None
         try:
-            import soundfile as sf
-            import numpy as np
-            import queue
             
             in1_route = self.config.get("in1_route", "Both Channels")
             in2_route = self.config.get("in2_route", "Both Channels")
@@ -1198,7 +1198,6 @@ class AudioRecorderApp(QMainWindow):
                 
                 def write_journal(closed=False):
                     try:
-                        import json
                         with open(os.path.join(self.current_session_folder, f"{session.session_id}_journal.json"), 'w') as jf:
                             json.dump({
                                 "session_id": session.session_id,
@@ -1347,6 +1346,7 @@ class AudioRecorderApp(QMainWindow):
                         pass
                                     
         except Exception as e:
+            logging.error(f"Worker died with exception: {e}", exc_info=True)
             if self.is_recording:
                 self.error_signal.emit(f"An error occurred during recording: {e}")
 
@@ -1394,7 +1394,6 @@ class AudioRecorderApp(QMainWindow):
             QMessageBox.warning(self, "Output Drive Missing", "The output drive you configured is currently disconnected.\n\nLike your microphone settings, this app does not automatically default to another location to prevent lost files.\n\nPlease reconnect the drive or select a new output folder in Settings.")
             return
             
-        import shutil
         try:
             total, used, free = shutil.disk_usage(drive + "\\")
             bytes_per_hour = int(self.config["sample_rate"]) * int(self.config["channels"]) * (int(self.config["bit_depth"]) / 8) * 3600
