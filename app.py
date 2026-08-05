@@ -190,9 +190,13 @@ class SoundSettingsDialog(QDialog):
         self.accept()
 
 config = load_config()
+try:
+    import updater
+    updater.cleanup_old_updates()
+except: pass
+
 if config.get("check_updates_startup", True):
     try:
-        import updater
         updater.run_auto_updater()
     except Exception as e:
         print("Updater failed to run:", e)
