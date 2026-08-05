@@ -841,6 +841,33 @@ class AudioRecorderApp(QMainWindow):
                 
         QTimer.singleShot(1000, self.check_recovery_journal)
 
+class RepairDialog(QDialog):
+    def __init__(self, filepath, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Incomplete Recording Detected")
+        
+        layout = QVBoxLayout(self)
+        
+        msg = f"It looks like Audio Recorder Pro was closed unexpectedly during your last session, and a recording may not have been finalized correctly.\n\nFile: {filepath}\n\nWould you like to attempt to repair this audio file now?"
+        
+        info_label = QLabel(msg)
+        info_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        btn_layout = QHBoxLayout()
+        self.btn_yes = QPushButton("Yes, &Repair Recording")
+        self.btn_yes.clicked.connect(self.accept)
+        self.btn_no = QPushButton("&No, Leave it alone")
+        self.btn_no.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.btn_yes)
+        btn_layout.addWidget(self.btn_no)
+        layout.addLayout(btn_layout)
+        
+        self.setTabOrder(info_label, self.btn_yes)
+        self.setTabOrder(self.btn_yes, self.btn_no)
+
     def check_recovery_journal(self):
         journal_path = os.path.join(APP_DIR, "active_recording.json")
         if os.path.exists(journal_path):
@@ -849,16 +876,8 @@ class AudioRecorderApp(QMainWindow):
                     data = json.load(jf)
                 filepath = data.get("current_file", "")
                 if filepath and os.path.exists(filepath):
-                    reply = QMessageBox.question(
-                        self, 
-                        "Incomplete Recording Detected", 
-                        f"It looks like Audio Recorder Pro was closed unexpectedly during your last session, and a recording may not have been finalized correctly.\n\n"
-                        f"File: {filepath}\n\n"
-                        f"Would you like to attempt to repair this audio file now?",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.Yes
-                    )
-                    if reply == QMessageBox.StandardButton.Yes:
+                    dialog = RepairDialog(filepath, self)
+                    if dialog.exec() == QDialog.DialogCode.Accepted:
                         if repair_wav_file(filepath):
                             QMessageBox.information(self, "Repair Successful", "The audio file was successfully repaired and should now be playable.")
                         else:
