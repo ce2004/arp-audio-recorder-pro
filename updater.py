@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.37"
+CURRENT_VERSION = "v1.0.38"
 
 # Globals for download tracking
 stop_beeping = False
@@ -128,13 +128,13 @@ def check_for_updates():
             releases = json.loads(response.read().decode())
             
         if not releases:
-            return None, None, None
+            return None, None, None, None
             
         latest_release = releases[0]
         latest_version = latest_release['tag_name']
         
         if latest_version == CURRENT_VERSION:
-            return None, None, None
+            return None, None, None, None
             
         release_notes_parts = []
         for release in releases:
