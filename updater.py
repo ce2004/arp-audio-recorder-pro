@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.34"
+CURRENT_VERSION = "v1.0.35"
 
 # Globals for download tracking
 stop_beeping = False
@@ -172,10 +172,11 @@ def check_for_updates():
 def cleanup_old_updates():
     app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
     import shutil
+    import re
     
     try:
         for item in os.listdir(app_dir):
-            if ".old_" in item:
+            if re.search(r'\.old_[a-f0-9]{8}$', item):
                 path = os.path.join(app_dir, item)
                 try:
                     if os.path.isdir(path): shutil.rmtree(path, ignore_errors=True)
