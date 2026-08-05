@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.26"
+CURRENT_VERSION = "v1.0.27"
 
 # Globals for download tracking
 stop_beeping = False
@@ -122,23 +122,47 @@ class UpdateDialog(QDialog):
 
 def check_for_updates():
     try:
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode())
-        
-        latest_version = data['tag_name']
-        release_notes = data.get('body', '')
-        
-        if latest_version != CURRENT_VERSION:
-            download_url = None
-            for asset in data.get('assets', []):
-                if asset['name'].endswith('.zip'):
-                    download_url = asset['browser_download_url']
-                    break
+            releases = json.loads(response.read().decode())
             
-            if download_url:
-                return latest_version, download_url, release_notes
+        if not releases:
+            return None, None, None
+            
+        latest_release = releases[0]
+        latest_version = latest_release['tag_name']
+        
+        if latest_version == CURRENT_VERSION:
+            return None, None, None
+            
+        release_notes_parts = []
+        for release in releases:
+            version = release.get('tag_name', '')
+            if version == CURRENT_VERSION:
+                break
+                
+            body = release.get('body', '').strip()
+            if body:
+                release_notes_parts.append(f"Changes in {version}:")
+                for line in body.split('\n'):
+                    cleaned_line = line.replace('#', '').strip()
+                    if cleaned_line:
+                        release_notes_parts.append(cleaned_line)
+                release_notes_parts.append("")
+                
+        release_notes = "\n".join(release_notes_parts).strip()
+        if not release_notes:
+            release_notes = latest_release.get('body', '')
+            
+        download_url = None
+        for asset in latest_release.get('assets', []):
+            if asset['name'].endswith('.zip'):
+                download_url = asset['browser_download_url']
+                break
+        
+        if download_url:
+            return latest_version, download_url, release_notes
     except Exception as e:
         print("Failed to check for updates:", e)
     return None, None, None
