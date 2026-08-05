@@ -13,6 +13,28 @@ import numpy as np
 import soundfile as sf
 import soundcard as sc
 
+APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+import struct
+def repair_wav_file(filepath):
+    try:
+        filesize = os.path.getsize(filepath)
+        if filesize < 44: return False
+        with open(filepath, 'r+b') as f:
+            if f.read(4) != b'RIFF': return False
+            f.seek(4)
+            f.write(struct.pack('<I', filesize - 8))
+            f.seek(12)
+            header_data = f.read(min(filesize, 4096))
+            data_offset = header_data.find(b'data')
+            if data_offset == -1: return False
+            size_offset = 12 + data_offset + 4
+            f.seek(size_offset)
+            f.write(struct.pack('<I', filesize - (size_offset + 4)))
+        return True
+    except Exception as e:
+        logging.error(f"Error repairing WAV: {e}")
+        return False
+
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arp_diagnostic.log")
 logging.basicConfig(
     filename=LOG_FILE,
@@ -816,6 +838,36 @@ class AudioRecorderApp(QMainWindow):
                 self.auto_start_timer.start(delay * 1000)
             else:
                 self.auto_start_timer.start(100)
+                
+        QTimer.singleShot(1000, self.check_recovery_journal)
+
+    def check_recovery_journal(self):
+        journal_path = os.path.join(APP_DIR, "active_recording.json")
+        if os.path.exists(journal_path):
+            try:
+                with open(journal_path, 'r') as jf:
+                    data = json.load(jf)
+                filepath = data.get("current_file", "")
+                if filepath and os.path.exists(filepath):
+                    reply = QMessageBox.question(
+                        self, 
+                        "Incomplete Recording Detected", 
+                        f"It looks like Audio Recorder Pro was closed unexpectedly during your last session, and a recording may not have been finalized correctly.\n\n"
+                        f"File: {filepath}\n\n"
+                        f"Would you like to attempt to repair this audio file now?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes
+                    )
+                    if reply == QMessageBox.StandardButton.Yes:
+                        if repair_wav_file(filepath):
+                            QMessageBox.information(self, "Repair Successful", "The audio file was successfully repaired and should now be playable.")
+                        else:
+                            QMessageBox.warning(self, "Repair Failed", "Could not repair the audio file. It may be too corrupted or not a valid recording.")
+            except Exception as e:
+                logging.error(f"Failed to process recovery journal: {e}")
+            finally:
+                try: os.remove(journal_path)
+                except: pass
 
     def notify(self, title, msg, setting_key):
         if not self.config.get(setting_key, True):
@@ -1202,14 +1254,12 @@ class AudioRecorderApp(QMainWindow):
                 
                 def write_journal(closed=False):
                     try:
-                        with open(os.path.join(self.current_session_folder, f"{session.session_id}_journal.json"), 'w') as jf:
-                            json.dump({
-                                "session_id": session.session_id,
-                                "current_file": self.current_filename,
-                                "frames_written": getattr(self, 'total_frames_written', 0),
-                                "last_flush": time.time(),
-                                "closed": closed
-                            }, jf)
+                        journal_path = os.path.join(APP_DIR, "active_recording.json")
+                        if closed:
+                            if os.path.exists(journal_path): os.remove(journal_path)
+                        else:
+                            with open(journal_path, 'w') as jf:
+                                json.dump({"current_file": self.current_filename}, jf)
                     except: pass
                 
                 while not session.stop_event.is_set() and not abort_recording:
