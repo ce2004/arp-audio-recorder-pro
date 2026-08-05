@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.25"
+CURRENT_VERSION = "v1.0.26"
 
 # Globals for download tracking
 stop_beeping = False
@@ -60,13 +60,16 @@ def beep_loop():
 
 def announce_progress(e=None):
     if not speaker: return
-    pct = int(current_progress * 100)
-    mb_s = round(current_speed_kb / 1024, 1)
-    dl_mb = round(current_downloaded_bytes / (1024*1024), 1)
-    tot_mb = round(current_total_bytes / (1024*1024), 1)
-    
-    text = f"{pct} percent, {mb_s} megabytes per second. {dl_mb} of {tot_mb} megabytes. {current_eta_s} seconds remaining."
-    speaker.speak(text, interrupt=True)
+    try:
+        pct = int(current_progress * 100)
+        mb_s = round(current_speed_kb / 1024, 1)
+        dl_mb = round(current_downloaded_bytes / (1024*1024), 1)
+        tot_mb = round(current_total_bytes / (1024*1024), 1)
+        
+        text = f"{pct} percent, {mb_s} megabytes per second. {dl_mb} of {tot_mb} megabytes. {current_eta_s} seconds remaining."
+        speaker.speak(text, interrupt=True)
+    except Exception:
+        pass
 
 
     _old_btn_key_press = QPushButton.keyPressEvent
@@ -204,8 +207,11 @@ def apply_update(download_url):
         
         stop_beeping = True
         if HAS_ACCESSIBILITY:
-            keyboard.unhook_all()
-            speaker.speak("Download complete, installing...", interrupt=True)
+            try:
+                keyboard.unhook_all()
+                speaker.speak("Download complete, installing...", interrupt=True)
+            except:
+                pass
             
         with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
             zip_ref.extractall(extract_dir)
