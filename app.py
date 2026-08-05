@@ -1187,6 +1187,28 @@ class AudioRecorderApp(QMainWindow):
                 mic1_silent = False
                 mic2_silent = False
                 
+                last_mic1_real_block = time.time()
+                last_mic2_real_block = time.time()
+                
+                self.mic1_stalled = False
+                self.mic2_stalled = False
+                
+                gain1 = float(self.config.get("in1_gain", 0.5 if mic2 else 1.0))
+                gain2 = float(self.config.get("in2_gain", 0.5))
+                
+                def write_journal(closed=False):
+                    try:
+                        import json
+                        with open(os.path.join(self.current_session_folder, f"{session.session_id}_journal.json"), 'w') as jf:
+                            json.dump({
+                                "session_id": session.session_id,
+                                "current_file": self.current_filename,
+                                "frames_written": getattr(self, 'total_frames_written', 0),
+                                "last_flush": time.time(),
+                                "closed": closed
+                            }, jf)
+                    except: pass
+                
                 while not session.stop_event.is_set() and not abort_recording:
                     s1 = q1.qsize()
                     s2 = q2.qsize() if mic2 else 0
@@ -1247,11 +1269,30 @@ class AudioRecorderApp(QMainWindow):
                                 break
                                 
                     last_frame_time = time.time()
+                    
+                    if not mic1_silent: last_mic1_real_block = time.time()
+                    if mic2 and not mic2_silent: last_mic2_real_block = time.time()
+                    
+                    curr = time.time()
+                    if curr - last_mic1_real_block > 2.0 and not self.mic1_stalled:
+                        self.mic1_stalled = True
+                        logging.warning("Mic 1 thread stalled! No blocks received for 2 seconds.")
+                        self.error_signal.emit("Warning: Input 1 stopped delivering audio (stalled)!")
+                    elif curr - last_mic1_real_block <= 2.0 and self.mic1_stalled:
+                        self.mic1_stalled = False
+                        
+                    if mic2:
+                        if curr - last_mic2_real_block > 2.0 and not self.mic2_stalled:
+                            self.mic2_stalled = True
+                            logging.warning("Mic 2 thread stalled! No blocks received for 2 seconds.")
+                            self.error_signal.emit("Warning: Input 2 stopped delivering audio (stalled)!")
+                        elif curr - last_mic2_real_block <= 2.0 and self.mic2_stalled:
+                            self.mic2_stalled = False
                             
                     if not self.is_paused:
-                        r1 = apply_routing(data1, in1_route, ch)
+                        r1 = apply_routing(data1, in1_route, ch) * gain1
                         if mic2:
-                            r2 = apply_routing(data2, in2_route, ch)
+                            r2 = apply_routing(data2, in2_route, ch) * gain2
                             mixed = np.clip(r1 + r2, -1.0, 1.0)
                             file.write(mixed)
                         else:
@@ -1261,6 +1302,7 @@ class AudioRecorderApp(QMainWindow):
                         if curr_time - last_flush_time > 2.0:
                             file.flush()
                             last_flush_time = curr_time
+                            write_journal(closed=False)
                             
                         self.total_frames_written = getattr(self, 'total_frames_written', 0) + len(r1)
                         
@@ -1300,6 +1342,7 @@ class AudioRecorderApp(QMainWindow):
                 if file and not file.closed:
                     try:
                         file.close()
+                        write_journal(closed=True)
                     except:
                         pass
                                     
@@ -1350,6 +1393,16 @@ class AudioRecorderApp(QMainWindow):
         if drive and not os.path.exists(drive + "\\"):
             QMessageBox.warning(self, "Output Drive Missing", "The output drive you configured is currently disconnected.\n\nLike your microphone settings, this app does not automatically default to another location to prevent lost files.\n\nPlease reconnect the drive or select a new output folder in Settings.")
             return
+            
+        import shutil
+        try:
+            total, used, free = shutil.disk_usage(drive + "\\")
+            bytes_per_hour = int(self.config["sample_rate"]) * int(self.config["channels"]) * (int(self.config["bit_depth"]) / 8) * 3600
+            if free < bytes_per_hour * 0.25:
+                QMessageBox.warning(self, "Low Disk Space", "You have very little disk space left on this drive (less than 15 minutes of recording time)!")
+            self.last_space_warning = 0
+        except Exception as e:
+            logging.warning(f"Failed to check disk space: {e}")
         
         dev_id = self.config.get("device_id", "")
         if not dev_id:

@@ -35,6 +35,11 @@ jobs:
         xcopy sounds "dist\Audio Recorder Pro\sounds\" /E /I
         Compress-Archive -Path "dist\Audio Recorder Pro\*" -DestinationPath "dist\Audio Recorder Pro.zip"
 
+    - name: Generate SHA256 Checksum
+      run: |
+        $hash = (Get-FileHash -Path "dist\Audio Recorder Pro.zip" -Algorithm SHA256).Hash
+        $hash | Out-File -FilePath "dist\sha256sum.txt" -Encoding utf8 -NoNewline
+
     - name: Extract Commit Message
       run: |
         git log -1 --pretty=%B | Out-File -FilePath release_notes.txt -Encoding utf8
@@ -42,7 +47,9 @@ jobs:
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
-        files: "dist/Audio Recorder Pro.zip"
+        files: |
+          dist/Audio Recorder Pro.zip
+          dist/sha256sum.txt
         body_path: release_notes.txt
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

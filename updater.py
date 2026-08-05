@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.31"
+CURRENT_VERSION = "v1.0.32"
 
 # Globals for download tracking
 stop_beeping = False
@@ -156,16 +156,18 @@ def check_for_updates():
             release_notes = latest_release.get('body', '')
             
         download_url = None
+        sha_url = None
         for asset in latest_release.get('assets', []):
             if asset['name'].endswith('.zip'):
                 download_url = asset['browser_download_url']
-                break
+            elif asset['name'] == 'sha256sum.txt':
+                sha_url = asset['browser_download_url']
         
         if download_url:
-            return latest_version, download_url, release_notes
+            return latest_version, download_url, release_notes, sha_url
     except Exception as e:
         print("Failed to check for updates:", e)
-    return None, None, None
+    return None, None, None, None
 
 def cleanup_old_updates():
     app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
@@ -188,7 +190,7 @@ def cleanup_old_updates():
         except:
             pass
 
-def apply_update(download_url):
+def apply_update(download_url, sha_url):
     global current_progress, current_speed_kb, current_eta_s, stop_beeping, current_downloaded_bytes, current_total_bytes
     try:
         if not getattr(sys, 'frozen', False):
@@ -230,10 +232,39 @@ def apply_update(download_url):
                         current_eta_s = int((current_total_bytes - current_downloaded_bytes) / (current_downloaded_bytes / elapsed))
         
         stop_beeping = True
+        
+        if sha_url:
+            try:
+                req_sha = urllib.request.Request(sha_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req_sha) as res_sha:
+                    expected_hash = res_sha.read().decode('utf-8').strip().upper()
+                
+                import hashlib
+                sha256_hash = hashlib.sha256()
+                with open(temp_zip, "rb") as f:
+                    for byte_block in iter(lambda: f.read(4096), b""):
+                        sha256_hash.update(byte_block)
+                actual_hash = sha256_hash.hexdigest().upper()
+                
+                if actual_hash != expected_hash:
+                    os.remove(temp_zip)
+                    if HAS_ACCESSIBILITY:
+                        try:
+                            keyboard.unhook_all()
+                            speaker.speak("Update failed. Cryptographic signature invalid.", interrupt=True)
+                        except: pass
+                    from PyQt6.QtWidgets import QMessageBox, QApplication
+                    app = QApplication.instance()
+                    if app: QMessageBox.critical(None, "Update Failed", "Cryptographic verification failed! The update file is corrupt or was tampered with during download. The update has been aborted.")
+                    return
+            except Exception as e:
+                print(f"Failed to verify hash: {e}")
+                raise e
+
         if HAS_ACCESSIBILITY:
             try:
                 keyboard.unhook_all()
-                speaker.speak("Download complete, installing...", interrupt=True)
+                speaker.speak("Download complete and verified. Installing...", interrupt=True)
             except:
                 pass
             
@@ -285,7 +316,7 @@ def apply_update(download_url):
 
 def run_auto_updater(manual=False):
     cleanup_old_updates()
-    version, url, notes = check_for_updates()
+    version, url, notes, sha_url = check_for_updates()
     if url:
         # Create a temporary QApplication to show the dialog before the main app starts
         app = QApplication.instance()
@@ -294,7 +325,7 @@ def run_auto_updater(manual=False):
             
         dialog = UpdateDialog(CURRENT_VERSION, version, notes)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            apply_update(url)
+            apply_update(url, sha_url)
     elif manual:
         app = QApplication.instance()
         if not app:
