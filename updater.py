@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.33"
+CURRENT_VERSION = "v1.0.34"
 
 # Globals for download tracking
 stop_beeping = False
@@ -171,24 +171,33 @@ def check_for_updates():
 
 def cleanup_old_updates():
     app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-    cleanup_file = os.path.join(app_dir, ".update_cleanup")
-    if os.path.exists(cleanup_file):
-        try:
-            with open(cleanup_file, "r") as f:
-                update_hash = f.read().strip()
-            if update_hash:
-                import shutil
-                for item in os.listdir(app_dir):
-                    if item.endswith(f".old_{update_hash}"):
-                        path = os.path.join(app_dir, item)
-                        try:
-                            if os.path.isdir(path): shutil.rmtree(path)
-                            else: os.remove(path)
-                        except:
-                            pass
-            os.remove(cleanup_file)
-        except:
-            pass
+    import shutil
+    
+    try:
+        for item in os.listdir(app_dir):
+            if ".old_" in item:
+                path = os.path.join(app_dir, item)
+                try:
+                    if os.path.isdir(path): shutil.rmtree(path, ignore_errors=True)
+                    else: os.remove(path)
+                except:
+                    pass
+    except: pass
+
+    try:
+        temp_zip = os.path.join(app_dir, "update.zip")
+        if os.path.exists(temp_zip): os.remove(temp_zip)
+    except: pass
+    
+    try:
+        extract_dir = os.path.join(app_dir, "update_extract")
+        if os.path.exists(extract_dir): shutil.rmtree(extract_dir, ignore_errors=True)
+    except: pass
+
+    try:
+        cleanup_file = os.path.join(app_dir, ".update_cleanup")
+        if os.path.exists(cleanup_file): os.remove(cleanup_file)
+    except: pass
 
 def apply_update(download_url, sha_url):
     global current_progress, current_speed_kb, current_eta_s, stop_beeping, current_downloaded_bytes, current_total_bytes
@@ -311,6 +320,12 @@ def apply_update(download_url, sha_url):
         sys.exit(0)
     except Exception as e:
         print("Error applying update:", e)
+        
+        try:
+            if os.path.exists(temp_zip): os.remove(temp_zip)
+            if os.path.exists(extract_dir): shutil.rmtree(extract_dir, ignore_errors=True)
+        except: pass
+        
         stop_beeping = True
         if HAS_ACCESSIBILITY: keyboard.unhook_all()
 
