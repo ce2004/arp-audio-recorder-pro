@@ -763,6 +763,33 @@ class SettingsDialog(QDialog):
         save_config(self.config)
         self.accept()
 
+class RepairDialog(QDialog):
+    def __init__(self, filepath, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Incomplete Recording Detected")
+        
+        layout = QVBoxLayout(self)
+        
+        msg = f"It looks like Audio Recorder Pro was closed unexpectedly during your last session, and a recording may not have been finalized correctly.\n\nFile: {filepath}\n\nWould you like to attempt to repair this audio file now?"
+        
+        info_label = QLabel(msg)
+        info_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        btn_layout = QHBoxLayout()
+        self.btn_yes = QPushButton("Yes, &Repair Recording")
+        self.btn_yes.clicked.connect(self.accept)
+        self.btn_no = QPushButton("&No, Leave it alone")
+        self.btn_no.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(self.btn_yes)
+        btn_layout.addWidget(self.btn_no)
+        layout.addLayout(btn_layout)
+        
+        self.setTabOrder(info_label, self.btn_yes)
+        self.setTabOrder(self.btn_yes, self.btn_no)
+
 class AudioRecorderApp(QMainWindow):
     error_signal = pyqtSignal(str)
     split_signal = pyqtSignal()
@@ -785,6 +812,7 @@ class AudioRecorderApp(QMainWindow):
         self.current_session_folder = None
         self.split_count = 1
         self.current_status_msg = "Status: Ready"
+        self.auto_resume_thread = None
         
         self.shutdown_poll_timer = QTimer(self)
         self.shutdown_poll_timer.timeout.connect(self.poll_session_shutdown)
@@ -840,33 +868,6 @@ class AudioRecorderApp(QMainWindow):
                 self.auto_start_timer.start(100)
                 
         QTimer.singleShot(1000, self.check_recovery_journal)
-
-class RepairDialog(QDialog):
-    def __init__(self, filepath, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Incomplete Recording Detected")
-        
-        layout = QVBoxLayout(self)
-        
-        msg = f"It looks like Audio Recorder Pro was closed unexpectedly during your last session, and a recording may not have been finalized correctly.\n\nFile: {filepath}\n\nWould you like to attempt to repair this audio file now?"
-        
-        info_label = QLabel(msg)
-        info_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-        
-        btn_layout = QHBoxLayout()
-        self.btn_yes = QPushButton("Yes, &Repair Recording")
-        self.btn_yes.clicked.connect(self.accept)
-        self.btn_no = QPushButton("&No, Leave it alone")
-        self.btn_no.clicked.connect(self.reject)
-        
-        btn_layout.addWidget(self.btn_yes)
-        btn_layout.addWidget(self.btn_no)
-        layout.addLayout(btn_layout)
-        
-        self.setTabOrder(info_label, self.btn_yes)
-        self.setTabOrder(self.btn_yes, self.btn_no)
 
     def check_recovery_journal(self):
         journal_path = os.path.join(APP_DIR, "active_recording.json")
