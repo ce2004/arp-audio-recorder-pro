@@ -6,6 +6,7 @@ import time
 import json
 import re
 import logging
+import logging.handlers
 import platform
 import queue
 import shutil
@@ -16,32 +17,90 @@ import soundcard as sc
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
 import struct
 def repair_wav_file(filepath):
+    backup_path = filepath + '.backup'
     try:
         filesize = os.path.getsize(filepath)
         if filesize < 44: return False
+        
+        shutil.copy2(filepath, backup_path)
+        
         with open(filepath, 'r+b') as f:
-            if f.read(4) != b'RIFF': return False
-            f.seek(4)
-            f.write(struct.pack('<I', filesize - 8))
-            f.seek(12)
-            header_data = f.read(min(filesize, 4096))
-            data_offset = header_data.find(b'data')
-            if data_offset == -1: return False
-            size_offset = 12 + data_offset + 4
-            f.seek(size_offset)
-            f.write(struct.pack('<I', filesize - (size_offset + 4)))
+            header = f.read(4)
+            if header not in (b'RIFF', b'RF64'):
+                return False
+                
+            f.seek(0)
+            header_data = f.read(min(filesize, 8192))
+            
+            if header == b'RIFF':
+                f.seek(4)
+                f.write(struct.pack('<I', filesize - 8))
+                
+                data_offset = header_data.find(b'data')
+                if data_offset == -1:
+                    raise Exception("No data chunk found")
+                    
+                size_offset = data_offset + 4
+                f.seek(size_offset)
+                f.write(struct.pack('<I', filesize - (size_offset + 4)))
+                
+            elif header == b'RF64':
+                f.seek(4)
+                f.write(struct.pack('<I', 0xFFFFFFFF))
+                
+                if header_data[8:12] != b'WAVE':
+                    raise Exception("No WAVE signature")
+                    
+                if header_data[12:16] != b'ds64':
+                    raise Exception("No ds64 chunk")
+                    
+                data_offset = header_data.find(b'data')
+                if data_offset == -1:
+                    raise Exception("No data chunk found")
+                    
+                f.seek(20)
+                f.write(struct.pack('<Q', filesize - 8))
+                
+                f.seek(data_offset + 4)
+                f.write(struct.pack('<I', 0xFFFFFFFF))
+                
+                actual_data_size = filesize - (data_offset + 8)
+                f.seek(28)
+                f.write(struct.pack('<Q', actual_data_size))
+                
+            f.flush()
+            os.fsync(f.fileno())
+            
+        try:
+            with sf.SoundFile(filepath, 'r') as sf_file:
+                if sf_file.frames <= 0:
+                    raise Exception("Invalid frame count")
+        except Exception as e:
+            raise Exception(f"Validation failed: {e}")
+            
+        try:
+            os.remove(backup_path)
+        except:
+            pass
+            
         return True
     except Exception as e:
         logging.error(f"Error repairing WAV: {e}")
+        try:
+            if os.path.exists(backup_path):
+                shutil.copy2(backup_path, filepath)
+        except:
+            pass
         return False
 
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arp_diagnostic.log")
-logging.basicConfig(
-    filename=LOG_FILE,
-    filemode='w',
-    level=logging.INFO,
-    format='%(asctime)s - %(threadName)s - %(levelname)s - %(message)s'
+_log_handler = logging.handlers.RotatingFileHandler(
+    LOG_FILE, maxBytes=5*1024*1024, backupCount=5, encoding='utf-8'
 )
+_log_handler.setFormatter(logging.Formatter('%(asctime)s - %(threadName)s - %(levelname)s - %(message)s'))
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+_root_logger.addHandler(_log_handler)
 logging.info(f"App started. OS: {platform.system()} {platform.release()}")
 
 from PyQt6.QtWidgets import (
@@ -813,6 +872,8 @@ class AudioRecorderApp(QMainWindow):
         self.split_count = 1
         self.current_status_msg = "Status: Ready"
         self.auto_resume_thread = None
+        self._pending_close = False
+        self._last_disk_warning_level = 0
         
         self.shutdown_poll_timer = QTimer(self)
         self.shutdown_poll_timer.timeout.connect(self.poll_session_shutdown)
@@ -822,6 +883,9 @@ class AudioRecorderApp(QMainWindow):
         
         self.max_len_timer = QTimer(self)
         self.max_len_timer.timeout.connect(self.force_stop_max_length)
+        
+        self.disk_space_timer = QTimer(self)
+        self.disk_space_timer.timeout.connect(self.check_disk_space)
         
         self.split_signal.connect(self.on_split_completed)
         
@@ -855,6 +919,8 @@ class AudioRecorderApp(QMainWindow):
                 
         self.update_dashboard_status()
         
+        self.check_recovery_journal()
+
         if self.config.get("auto_start", False):
             delay = self.config.get("auto_start_delay", 0)
             self.auto_start_timer = QTimer(self)
@@ -866,28 +932,39 @@ class AudioRecorderApp(QMainWindow):
                 self.auto_start_timer.start(delay * 1000)
             else:
                 self.auto_start_timer.start(100)
-                
-        QTimer.singleShot(1000, self.check_recovery_journal)
 
     def check_recovery_journal(self):
-        journal_path = os.path.join(APP_DIR, "active_recording.json")
-        if os.path.exists(journal_path):
+        journal_paths = [os.path.join(APP_DIR, "active_recording.json")]
+        save_folder = self.config.get("save_folder", "")
+        if save_folder and os.path.exists(save_folder):
+            journal_paths.append(os.path.join(save_folder, "active_recording.json"))
             try:
-                with open(journal_path, 'r') as jf:
-                    data = json.load(jf)
-                filepath = data.get("current_file", "")
-                if filepath and os.path.exists(filepath):
-                    dialog = RepairDialog(filepath, self)
-                    if dialog.exec() == QDialog.DialogCode.Accepted:
-                        if repair_wav_file(filepath):
-                            QMessageBox.information(self, "Repair Successful", "The audio file was successfully repaired and should now be playable.")
-                        else:
-                            QMessageBox.warning(self, "Repair Failed", "Could not repair the audio file. It may be too corrupted or not a valid recording.")
-            except Exception as e:
-                logging.error(f"Failed to process recovery journal: {e}")
-            finally:
-                try: os.remove(journal_path)
-                except: pass
+                subfolders = [os.path.join(save_folder, d) for d in os.listdir(save_folder) if os.path.isdir(os.path.join(save_folder, d))]
+                subfolders.sort(key=os.path.getmtime, reverse=True)
+                for sf_dir in subfolders[:5]:
+                    journal_paths.append(os.path.join(sf_dir, "active_recording.json"))
+            except: pass
+            
+        for journal_path in journal_paths:
+            if os.path.exists(journal_path):
+                try:
+                    with open(journal_path, 'r') as jf:
+                        data = json.load(jf)
+                    filepath = data.get("current_file", "")
+                    if filepath and os.path.exists(filepath):
+                        dialog = RepairDialog(filepath, self)
+                        if dialog.exec() == QDialog.DialogCode.Accepted:
+                            if repair_wav_file(filepath):
+                                QMessageBox.information(self, "Repair Successful", "The audio file was successfully repaired and should now be playable.")
+                                try: os.remove(journal_path)
+                                except: pass
+                            else:
+                                QMessageBox.warning(self, "Repair Failed", "Could not repair the audio file. It may be too corrupted or not a valid recording.")
+                    else:
+                        try: os.remove(journal_path)
+                        except: pass
+                except Exception as e:
+                    logging.error(f"Failed to process recovery journal: {e}")
 
     def notify(self, title, msg, setting_key):
         if not self.config.get(setting_key, True):
@@ -1082,6 +1159,54 @@ class AudioRecorderApp(QMainWindow):
             self.stop_recording(notify=False)
             self.notify("Max Length Reached", "The recording automatically stopped because it reached the maximum length.", "notify_start_stop")
 
+    def check_disk_space(self):
+        if not self.is_recording or not self.current_session_folder:
+            return
+            
+        try:
+            drive = os.path.splitdrive(self.current_session_folder)[0].upper()
+            if not drive:
+                return
+            drive_path = drive + "\\" if not drive.endswith("\\") else drive
+            
+            total, used, free = shutil.disk_usage(drive_path)
+            sr = int(self.config.get("sample_rate", 48000))
+            ch = int(self.config.get("channels", 2))
+            bd = int(self.config.get("bit_depth", 24))
+            
+            bytes_per_second = sr * ch * (bd / 8)
+            if bytes_per_second == 0:
+                return
+                
+            remaining_minutes = free / (bytes_per_second * 60)
+            
+            if remaining_minutes <= 1 and self._last_disk_warning_level < 4:
+                self._last_disk_warning_level = 4
+                msg = "Emergency: Less than 1 minute of disk space! Stopping recording."
+                logging.error(msg)
+                self.speak(msg)
+                self.stop_recording()
+            elif remaining_minutes <= 5 and self._last_disk_warning_level < 3:
+                self._last_disk_warning_level = 3
+                msg = "Urgent Warning: Less than 5 minutes of disk space remaining!"
+                logging.warning(msg)
+                self.speak(msg)
+            elif remaining_minutes <= 15 and self._last_disk_warning_level < 2:
+                self._last_disk_warning_level = 2
+                msg = "Critical Warning: Less than 15 minutes of disk space remaining."
+                logging.warning(msg)
+                self.speak(msg)
+            elif remaining_minutes <= 60 and self._last_disk_warning_level < 1:
+                self._last_disk_warning_level = 1
+                msg = "Warning: Less than 60 minutes of disk space remaining."
+                logging.warning(msg)
+                self.speak(msg)
+            elif remaining_minutes > 60:
+                self._last_disk_warning_level = 0
+                
+        except Exception as e:
+            logging.error(f"Error checking disk space: {e}")
+
     def handle_drive_disconnect(self, drive):
         if getattr(self, 'handling_disconnect', False): return
         self.handling_disconnect = True
@@ -1093,7 +1218,7 @@ class AudioRecorderApp(QMainWindow):
         if self.config.get("notify_drive_disconnect", True):
             msg = f"The drive {drive} was disconnected."
             if was_recording:
-                msg += " The contents of the recording up to this point have been saved."
+                msg += " Recording is stopping. File integrity has not yet been confirmed."
             self.notify("Drive Disconnected", msg, "notify_drive_disconnect")
             
         if was_recording and self.config.get("auto_resume_unattended", False):
@@ -1107,7 +1232,7 @@ class AudioRecorderApp(QMainWindow):
             
         QMessageBox.critical(self, "Drive Disconnected", 
             f"The output drive ({drive}) was suddenly removed or disconnected.\n\n" +
-            ("The active recording was automatically stopped. The contents of the recording up to this point have been safely saved.\n\n" if was_recording else "") +
+            ("The active recording was automatically stopped. Recording is stopping. File integrity has not yet been confirmed.\n\n" if was_recording else "") +
             "Please reconnect the drive or go to Settings to select a new Output Directory."
         )
         self.handling_disconnect = False
@@ -1131,7 +1256,7 @@ class AudioRecorderApp(QMainWindow):
             self.notify("Microphone Disconnected", msg, "notify_mic_disconnect")
             QMessageBox.critical(self, "Microphone Disconnected", msg)
         else:
-            msg += "\n\nRecording has been safely stopped."
+            msg += "\n\nRecording is stopping. File integrity has not yet been confirmed."
             self.stop_recording(notify=False)
             self.notify("Microphone Disconnected", msg, "notify_mic_disconnect")
             
@@ -1201,7 +1326,7 @@ class AudioRecorderApp(QMainWindow):
                         out[:, 1] = data[:, 0]
                 return out
                 
-            file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype, format='WAVEX')
+            file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype, format='RF64')
             
             is_active = True
             def check_active(): return not session.stop_event.is_set() and is_active
@@ -1237,10 +1362,14 @@ class AudioRecorderApp(QMainWindow):
             t1.start()
             
             q2 = None
+            t2 = None
             if mic2:
                 q2 = queue.Queue(maxsize=100)
                 t2 = threading.Thread(target=reader_thread, args=(mic2, q2), daemon=True)
                 t2.start()
+                session.reader_threads = [t1, t2]
+            else:
+                session.reader_threads = [t1]
                 
             try:
                 ready_barrier.wait()
@@ -1274,13 +1403,31 @@ class AudioRecorderApp(QMainWindow):
                 
                 def write_journal(closed=False):
                     try:
-                        journal_path = os.path.join(APP_DIR, "active_recording.json")
+                        journal_dir = getattr(self, 'current_session_folder', None) or APP_DIR
+                        journal_path = os.path.join(journal_dir, "active_recording.json")
                         if closed:
                             if os.path.exists(journal_path): os.remove(journal_path)
                         else:
-                            with open(journal_path, 'w') as jf:
-                                json.dump({"current_file": self.current_filename}, jf)
-                    except: pass
+                            journal_data = {
+                                "session_id": session.session_id,
+                                "start_time": datetime.datetime.fromtimestamp(session.start_time).isoformat(),
+                                "sample_rate": sr,
+                                "channels": ch,
+                                "bit_depth": int(self.config.get("bit_depth", 24)),
+                                "current_file": self.current_filename,
+                                "frames_committed": getattr(self, 'total_frames_written', 0),
+                                "last_flush": datetime.datetime.now().isoformat(),
+                                "split_number": getattr(self, 'split_count', 1),
+                                "clean_close": False
+                            }
+                            tmp_path = journal_path + '.tmp'
+                            with open(tmp_path, 'w') as jf:
+                                json.dump(journal_data, jf)
+                                jf.flush()
+                                os.fsync(jf.fileno())
+                            os.replace(tmp_path, journal_path)
+                    except:
+                        pass
                 
                 while not session.stop_event.is_set() and not abort_recording:
                     s1 = q1.qsize()
@@ -1385,10 +1532,14 @@ class AudioRecorderApp(QMainWindow):
                             folder = self.config.get("save_folder", "")
                             drive = os.path.splitdrive(folder)[0].upper()
                             drive_path = drive + "\\" if not drive.endswith("\\") else drive
+                            
                             try:
                                 file.close()
-                            except:
-                                pass
+                                logging.info(f"Split file closed successfully: {self.current_filename}")
+                            except Exception as close_err:
+                                logging.error(f"Failed to close split file: {close_err}", exc_info=True)
+                                self.error_signal.emit(f"Failed to close split file: {close_err}")
+                                break
                             
                             if drive and drive != "C:" and not os.path.exists(drive_path):
                                 self.error_signal.emit("Output drive disconnected during auto-split.")
@@ -1403,11 +1554,12 @@ class AudioRecorderApp(QMainWindow):
                                 counter += 1
                             
                             try:
-                                file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype, format='WAVEX')
+                                file = sf.SoundFile(self.current_filename, mode='w', samplerate=sr, channels=ch, subtype=subtype, format='RF64')
                                 logging.info(f"Successfully opened next split file: {self.current_filename}")
                             except Exception as e:
                                 logging.error(f"Failed to open next split file: {e}", exc_info=True)
                                 self.error_signal.emit(f"Failed to open next split file: {e}")
+                                break
                             self.total_frames_written = 0
                             self.split_signal.emit()
             finally:
@@ -1416,8 +1568,26 @@ class AudioRecorderApp(QMainWindow):
                     try:
                         file.close()
                         write_journal(closed=True)
-                    except:
-                        pass
+                        session.finalization_status = "SUCCESS"
+                        try:
+                            with sf.SoundFile(self.current_filename, 'r') as verify_f:
+                                if verify_f.frames <= 0 or verify_f.channels != ch or verify_f.samplerate != sr:
+                                    session.finalization_status = "CLOSED_WITH_WARNINGS"
+                                    logging.warning(f"File verification warning: frames={verify_f.frames}, ch={verify_f.channels}, sr={verify_f.samplerate}")
+                        except Exception as ve:
+                            session.finalization_status = "CLOSED_WITH_WARNINGS"
+                            logging.warning(f"File verification failed: {ve}")
+                    except Exception as close_err:
+                        session.finalization_status = "FINALIZATION_FAILED"
+                        session.error_state = str(close_err)
+                        logging.error(f"Finalization failed: {close_err}", exc_info=True)
+                else:
+                    session.finalization_status = "SUCCESS"
+                    write_journal(closed=True)
+                for rt in getattr(session, 'reader_threads', []):
+                    rt.join(timeout=3.0)
+                    if rt.is_alive():
+                        logging.warning(f"Reader thread {rt.name} did not shut down within 3 seconds")
                                     
         except Exception as e:
             logging.error(f"Worker died with exception: {e}", exc_info=True)
@@ -1450,7 +1620,7 @@ class AudioRecorderApp(QMainWindow):
             self.speak("Recording resumed")
             self.btn_pause.setText("&Pause")
             if self.config.get("auto_split_secs", 0) > 0:
-                self.current_status_msg = f"Status: Recording Split {getattr(self, 'split_count', 1)} to {os.path.basename(self.current_filename)}"
+                self.current_status_msg = f"Status: Recording Split {self.split_count} to {os.path.basename(self.current_filename)}"
             else:
                 self.current_status_msg = f"Status: Recording to {os.path.basename(self.current_filename)}"
         self.update_dashboard_status()
@@ -1559,6 +1729,8 @@ class AudioRecorderApp(QMainWindow):
             if max_len > 0:
                 self.max_len_timer.start(max_len * 1000)
                 
+            self.disk_space_timer.start(5000)
+                
             if split_secs > 0:
                 self.live_stats_lbl.setText("Recording time, 0 seconds. 0.00 MB Storage used on current split.")
             else:
@@ -1593,6 +1765,8 @@ class AudioRecorderApp(QMainWindow):
         self.split_timer.stop()
         self.max_len_timer.stop()
         self.live_stats_timer.stop()
+        if hasattr(self, 'disk_space_timer'):
+            self.disk_space_timer.stop()
         
         self.btn_toggle_record.setEnabled(False)
         self.btn_pause.setEnabled(False)
@@ -1611,6 +1785,10 @@ class AudioRecorderApp(QMainWindow):
     def poll_session_shutdown(self):
         if self.record_thread_handle and self.record_thread_handle.is_alive():
             return
+            
+        if self.current_session and hasattr(self.current_session, 'reader_threads'):
+            if any(t.is_alive() for t in self.current_session.reader_threads):
+                return
             
         self.shutdown_poll_timer.stop()
         self.shutting_down = False
@@ -1633,15 +1811,34 @@ class AudioRecorderApp(QMainWindow):
         if self.notify_on_stop and self.current_session:
             dropped = self.current_session.dropped_blocks
             silence = self.current_session.silence_blocks
-            msg = "File safely saved to disk!"
-            if dropped > 0 or silence > 0:
-                msg += f"\n\nQuality Warning: {dropped} blocks dropped, {silence} silence blocks substituted."
-                self.speak("Recording saved with quality warnings.")
+            fin_status = getattr(self.current_session, 'finalization_status', 'SUCCESS')
+            if fin_status == "FINALIZATION_FAILED":
+                msg = "WARNING: File finalization failed! The recording may be incomplete or corrupt."
+                self.speak("Warning. File finalization failed.")
+            elif fin_status == "CLOSED_WITH_WARNINGS":
+                msg = "File saved with warnings. Please verify the recording."
+                self.speak("Recording saved with verification warnings.")
             else:
-                self.speak("Recording saved successfully.")
+                msg = "File safely saved to disk!"
+                if dropped > 0 or silence > 0:
+                    msg += f"\n\nQuality Warning: {dropped} blocks dropped, {silence} silence blocks substituted."
+                    self.speak("Recording saved with quality warnings.")
+                else:
+                    self.speak("Recording saved successfully.")
             self.notify("Recording Saved", msg, "notify_start_stop")
+        
+        if getattr(self, '_pending_close', False):
+            self._pending_close = False
+            self.close()
 
     def closeEvent(self, event):
+        if getattr(self, '_pending_close', False):
+            if hasattr(self, 'drive_thread'):
+                self.drive_thread.stop()
+                self.drive_thread.wait(100)
+            event.accept()
+            return
+        
         if self.is_recording and self.config.get("confirm_exit", True):
             stats = self.live_stats_lbl.text() if self.live_stats_lbl.isVisible() else "Recording in progress."
             msg = (
@@ -1659,8 +1856,14 @@ class AudioRecorderApp(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
-                
-        self.stop_recording(notify=True)
+        
+        if self.is_recording or self.shutting_down:
+            self._pending_close = True
+            self.speak("Finalizing recording before exit. Please do not turn off the computer.")
+            self.stop_recording(notify=True)
+            event.ignore()
+            return
+        
         if hasattr(self, 'drive_thread'):
             self.drive_thread.stop()
             self.drive_thread.wait(100)

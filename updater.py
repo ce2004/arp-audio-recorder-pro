@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.43"
+CURRENT_VERSION = "v1.0.44"
 
 # Globals for download tracking
 stop_beeping = False
@@ -71,7 +71,7 @@ def announce_progress(e=None):
     except Exception:
         pass
 
-
+try:
     _old_btn_key_press = QPushButton.keyPressEvent
     def new_btn_key_press(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
@@ -79,6 +79,8 @@ def announce_progress(e=None):
             return
         _old_btn_key_press(self, event)
     QPushButton.keyPressEvent = new_btn_key_press
+except NameError:
+    pass
 
 class UpdateDialog(QDialog):
     def __init__(self, current_ver, new_ver, release_notes):
@@ -133,8 +135,15 @@ def check_for_updates():
         latest_release = releases[0]
         latest_version = latest_release['tag_name']
         
-        if latest_version == CURRENT_VERSION:
-            return None, None, None, None
+        def parse_ver(v):
+            return tuple(int(x) for x in v.lstrip('v').split('.'))
+        
+        try:
+            if parse_ver(CURRENT_VERSION) >= parse_ver(latest_version):
+                return None, None, None, None
+        except Exception:
+            if latest_version == CURRENT_VERSION:
+                return None, None, None, None
             
         release_notes_parts = []
         for release in releases:
@@ -158,7 +167,7 @@ def check_for_updates():
         download_url = None
         sha_url = None
         for asset in latest_release.get('assets', []):
-            if asset['name'].endswith('.zip'):
+            if asset['name'].endswith('.zip') and 'audio recorder pro' in asset['name'].lower() and download_url is None:
                 download_url = asset['browser_download_url']
             elif asset['name'] == 'sha256sum.txt':
                 sha_url = asset['browser_download_url']
@@ -176,18 +185,33 @@ def cleanup_old_updates():
         import shutil
         import re
         import time
+        import json
         
         for _ in range(30):
             all_clean = True
             try:
-                for item in os.listdir(app_dir):
-                    if re.search(r'\.old_[a-f0-9]{8}$', item):
-                        path = os.path.join(app_dir, item)
+                manifest_path = os.path.join(app_dir, '.update_manifest.json')
+                if os.path.exists(manifest_path):
+                    with open(manifest_path, 'r') as f:
+                        paths = json.load(f)
+                    for path in paths:
                         try:
                             if os.path.isdir(path): shutil.rmtree(path, ignore_errors=True)
                             else: os.remove(path)
                         except: pass
                         if os.path.exists(path): all_clean = False
+                    if all_clean:
+                        try: os.remove(manifest_path)
+                        except: pass
+                else:
+                    for item in os.listdir(app_dir):
+                        if re.search(r'\.old_[a-f0-9]{8}$', item):
+                            path = os.path.join(app_dir, item)
+                            try:
+                                if os.path.isdir(path): shutil.rmtree(path, ignore_errors=True)
+                                else: os.remove(path)
+                            except: pass
+                            if os.path.exists(path): all_clean = False
             except: all_clean = False
 
             try:
@@ -255,33 +279,44 @@ def apply_update(download_url, sha_url):
         
         stop_beeping = True
         
-        if sha_url:
-            try:
-                req_sha = urllib.request.Request(sha_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req_sha) as res_sha:
-                    expected_hash = res_sha.read().decode('utf-8').strip().upper()
-                
-                import hashlib
-                sha256_hash = hashlib.sha256()
-                with open(temp_zip, "rb") as f:
-                    for byte_block in iter(lambda: f.read(4096), b""):
-                        sha256_hash.update(byte_block)
-                actual_hash = sha256_hash.hexdigest().upper()
-                
-                if actual_hash != expected_hash:
-                    os.remove(temp_zip)
-                    if HAS_ACCESSIBILITY:
-                        try:
-                            keyboard.unhook_all()
-                            speaker.speak("Update failed. Cryptographic signature invalid.", interrupt=True)
-                        except: pass
-                    from PyQt6.QtWidgets import QMessageBox, QApplication
-                    app = QApplication.instance()
-                    if app: QMessageBox.critical(None, "Update Failed", "Cryptographic verification failed! The update file is corrupt or was tampered with during download. The update has been aborted.")
-                    return
-            except Exception as e:
-                print(f"Failed to verify hash: {e}")
-                raise e
+        if not sha_url:
+            os.remove(temp_zip)
+            if HAS_ACCESSIBILITY:
+                try:
+                    keyboard.unhook_all()
+                    speaker.speak("Update aborted: No cryptographic hash file found. For security, updates without verification data cannot be installed.", interrupt=True)
+                except: pass
+            from PyQt6.QtWidgets import QMessageBox, QApplication
+            app = QApplication.instance()
+            if app: QMessageBox.critical(None, "Update Failed", "Update aborted: No cryptographic hash file found. For security, updates without verification data cannot be installed.")
+            return
+
+        try:
+            req_sha = urllib.request.Request(sha_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req_sha) as res_sha:
+                expected_hash = res_sha.read().decode('utf-8').strip().upper()
+            
+            import hashlib
+            sha256_hash = hashlib.sha256()
+            with open(temp_zip, "rb") as f:
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+            actual_hash = sha256_hash.hexdigest().upper()
+            
+            if actual_hash != expected_hash:
+                os.remove(temp_zip)
+                if HAS_ACCESSIBILITY:
+                    try:
+                        keyboard.unhook_all()
+                        speaker.speak("Update failed. SHA-256 hash invalid.", interrupt=True)
+                    except: pass
+                from PyQt6.QtWidgets import QMessageBox, QApplication
+                app = QApplication.instance()
+                if app: QMessageBox.critical(None, "Update Failed", "SHA-256 hash verification failed! The update file is corrupt or was tampered with during download. The update has been aborted.")
+                return
+        except Exception as e:
+            print(f"Failed to verify hash: {e}")
+            raise e
 
         if HAS_ACCESSIBILITY:
             try:
@@ -297,6 +332,7 @@ def apply_update(download_url, sha_url):
         update_hash = hashlib.md5(str(time.time()).encode()).hexdigest()[:8]
         cleanup_file = os.path.join(app_dir, ".update_cleanup")
         
+        manifest_paths = []
         for item in os.listdir(extract_dir):
             s = os.path.join(extract_dir, item)
             d = os.path.join(app_dir, item)
@@ -311,6 +347,7 @@ def apply_update(download_url, sha_url):
                         pass
                 try:
                     os.rename(d, old_d)
+                    manifest_paths.append(old_d)
                 except:
                     pass
             
@@ -321,6 +358,12 @@ def apply_update(download_url, sha_url):
         
         os.remove(temp_zip)
         shutil.rmtree(extract_dir)
+        
+        try:
+            with open(os.path.join(app_dir, '.update_manifest.json'), "w") as f:
+                json.dump(manifest_paths, f)
+        except:
+            pass
         
         try:
             with open(cleanup_file, "w") as f:
@@ -335,8 +378,8 @@ def apply_update(download_url, sha_url):
         print("Error applying update:", e)
         
         try:
-            if os.path.exists(temp_zip): os.remove(temp_zip)
-            if os.path.exists(extract_dir): shutil.rmtree(extract_dir, ignore_errors=True)
+            if 'temp_zip' in locals() and os.path.exists(temp_zip): os.remove(temp_zip)
+            if 'extract_dir' in locals() and os.path.exists(extract_dir): shutil.rmtree(extract_dir, ignore_errors=True)
         except: pass
         
         stop_beeping = True
