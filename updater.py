@@ -24,7 +24,7 @@ except ImportError:
     HAS_ACCESSIBILITY = False
 
 GITHUB_REPO = "ce2004/arp-audio-recorder-pro"  
-CURRENT_VERSION = "v1.0.44"
+CURRENT_VERSION = "v1.0.45"
 
 # Globals for download tracking
 stop_beeping = False
@@ -40,7 +40,7 @@ else:
     speaker = None
 
 def beep_loop():
-    global stop_beeping, current_progress
+
     try:
         snd_speaker = sc.default_speaker()
         fs = 44100
@@ -126,7 +126,7 @@ def check_for_updates():
     try:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
             releases = json.loads(response.read().decode())
             
         if not releases:
@@ -167,7 +167,7 @@ def check_for_updates():
         download_url = None
         sha_url = None
         for asset in latest_release.get('assets', []):
-            if asset['name'].endswith('.zip') and 'audio recorder pro' in asset['name'].lower() and download_url is None:
+            if asset['name'].lower().endswith('.zip') and download_url is None:
                 download_url = asset['browser_download_url']
             elif asset['name'] == 'sha256sum.txt':
                 sha_url = asset['browser_download_url']
@@ -257,8 +257,11 @@ def apply_update(download_url, sha_url):
             beep_thread.start()
         
         req = urllib.request.Request(download_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req) as response:
-            current_total_bytes = int(response.getheader('Content-Length').strip())
+        with urllib.request.urlopen(req, timeout=15) as response:
+            length_header = response.getheader('Content-Length')
+            current_total_bytes = int(length_header.strip()) if length_header else 1
+            if current_total_bytes == 0:
+                current_total_bytes = 1
             current_downloaded_bytes = 0
             chunk_size = 8192
             start_time = time.time()
@@ -271,7 +274,7 @@ def apply_update(download_url, sha_url):
                     f.write(chunk)
                     current_downloaded_bytes += len(chunk)
                     
-                    current_progress = current_downloaded_bytes / current_total_bytes
+                    current_progress = min(current_downloaded_bytes / current_total_bytes, 1.0)
                     elapsed = time.time() - start_time
                     if elapsed > 0:
                         current_speed_kb = int((current_downloaded_bytes / 1024) / elapsed)
@@ -293,8 +296,8 @@ def apply_update(download_url, sha_url):
 
         try:
             req_sha = urllib.request.Request(sha_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req_sha) as res_sha:
-                expected_hash = res_sha.read().decode('utf-8').strip().upper()
+            with urllib.request.urlopen(req_sha, timeout=10) as res_sha:
+                expected_hash = res_sha.read().decode('utf-8-sig').strip().upper()
             
             import hashlib
             sha256_hash = hashlib.sha256()
@@ -333,29 +336,56 @@ def apply_update(download_url, sha_url):
         cleanup_file = os.path.join(app_dir, ".update_cleanup")
         
         manifest_paths = []
-        for item in os.listdir(extract_dir):
-            s = os.path.join(extract_dir, item)
-            d = os.path.join(app_dir, item)
-            old_d = d + f".old_{update_hash}"
-            
-            if os.path.exists(d):
-                if os.path.exists(old_d):
-                    try:
-                        if os.path.isdir(old_d): shutil.rmtree(old_d)
-                        else: os.remove(old_d)
-                    except:
-                        pass
-                try:
-                    os.rename(d, old_d)
-                    manifest_paths.append(old_d)
-                except:
-                    pass
-            
-            if os.path.isdir(s):
-                shutil.copytree(s, d)
-            else:
-                shutil.copy2(s, d)
+        rollback_map = {}
+        new_items = []
+        update_success = True
         
+        try:
+            for item in os.listdir(extract_dir):
+                s = os.path.join(extract_dir, item)
+                d = os.path.join(app_dir, item)
+                old_d = d + f".old_{update_hash}"
+                
+                if os.path.exists(d):
+                    if os.path.exists(old_d):
+                        try:
+                            if os.path.isdir(old_d): shutil.rmtree(old_d)
+                            else: os.remove(old_d)
+                        except: pass
+                    os.rename(d, old_d)
+                    rollback_map[old_d] = d
+                    manifest_paths.append(old_d)
+                
+                if os.path.isdir(s):
+                    shutil.copytree(s, d)
+                else:
+                    shutil.copy2(s, d)
+                new_items.append(d)
+                
+        except Exception as e:
+            print("Error during transactional copy:", e)
+            update_success = False
+            for new_item in new_items:
+                try:
+                    if os.path.isdir(new_item): shutil.rmtree(new_item)
+                    else: os.remove(new_item)
+                except: pass
+            for old_path, orig_path in rollback_map.items():
+                try:
+                    os.rename(old_path, orig_path)
+                except: pass
+            
+        if not update_success:
+            os.remove(temp_zip)
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            if HAS_ACCESSIBILITY:
+                try: speaker.speak("Update failed during copy. Changes have been rolled back.", interrupt=True)
+                except: pass
+            from PyQt6.QtWidgets import QMessageBox, QApplication
+            app = QApplication.instance()
+            if app: QMessageBox.critical(None, "Update Failed", "Update failed during installation. Your application has been rolled back to its previous state.")
+            return
+
         os.remove(temp_zip)
         shutil.rmtree(extract_dir)
         

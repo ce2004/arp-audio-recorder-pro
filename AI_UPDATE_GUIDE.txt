@@ -3,7 +3,7 @@ AI ASSISTANT GUIDE - REPOSITORY PROTOCOLS AND RELEASE WORKFLOW
 Hello AI Assistant! The repository owner relies on a screen reader (NVDA) for accessibility. When assisting the owner and pushing new updates, you must strictly follow the protocols and automated release workflows detailed below.
 
 CRITICAL FORMATTING RULE: NO MARKDOWN NUMBER SIGNS
-Do not use the "#" character for markdown headers in ANY file. Screen readers read "#" out loud as the word "Number", which ruins the reading experience. Instead, use ALL CAPS or standard text with dashed underlines ("---") to denote sections.
+Do not use the "#" character for markdown headers in ANY file. Screen readers read "#" out loud as the word "Number", which ruins the reading experience. Instead, use ALL CAPS or standard text with dashed underlines ("---") to denote sections. This goes for * as well.
 
 ---
 

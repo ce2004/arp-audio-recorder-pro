@@ -14,7 +14,13 @@ import numpy as np
 import soundfile as sf
 import soundcard as sc
 
-APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+def _get_app_data_dir():
+    base = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
+    d = os.path.join(base, "Audio Recorder Pro")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+APP_DIR = _get_app_data_dir()
 import struct
 def repair_wav_file(filepath):
     backup_path = filepath + '.backup'
@@ -93,7 +99,7 @@ def repair_wav_file(filepath):
             pass
         return False
 
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arp_diagnostic.log")
+LOG_FILE = os.path.join(APP_DIR, "arp_diagnostic.log")
 _log_handler = logging.handlers.RotatingFileHandler(
     LOG_FILE, maxBytes=5*1024*1024, backupCount=5, encoding='utf-8'
 )
@@ -118,7 +124,7 @@ try:
 except ImportError:
     pass
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recorder_config.json")
+CONFIG_FILE = os.path.join(APP_DIR, "recorder_config.json")
 
 def load_config():
     default_config = {
@@ -736,7 +742,7 @@ class SettingsDialog(QDialog):
                 msg.setIcon(QMessageBox.Icon.Warning)
                 msg.setWindowTitle("External Drive Warning")
                 msg.setText(f"You have selected a directory on drive {drive}.\n\nWhile this will work perfectly, it can be dangerous. If this is a removable USB drive or external hard drive and it gets disconnected or bumped while the app is running, your recording could be abruptly terminated.\n\nPlease ensure the drive remains securely connected.")
-                btn_understand = msg.addButton("I understand", QMessageBox.ButtonRole.AcceptRole)
+                msg.addButton("I understand", QMessageBox.ButtonRole.AcceptRole)
                 btn_revert = msg.addButton("Revert", QMessageBox.ButtonRole.RejectRole)
                 msg.exec()
                 
@@ -798,6 +804,17 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Invalid Selection", "Input 1 and Input 2 cannot be the same device.")
             return
             
+        if d2 != "none" and d1 != d2:
+            reply = QMessageBox.warning(self, "Hardware Clock Drift Warning", 
+                "You have selected two independent audio devices.\n\n"
+                "Because they use separate hardware clocks, they will naturally drift apart over time. "
+                "This application does not perform adaptive resampling. Over long recordings, you may experience "
+                "audio dropouts, clicks, or sync issues as the application drops blocks to keep them aligned.\n\n"
+                "Do you still want to use two independent devices?", 
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.No:
+                return
+
         self.config["device_id"] = d1
         self.config["device2_id"] = d2
         
@@ -842,12 +859,20 @@ class RepairDialog(QDialog):
         self.btn_no = QPushButton("&No, Leave it alone")
         self.btn_no.clicked.connect(self.reject)
         
+        self.btn_forget = QPushButton("&Forget this recovery information")
+        self.btn_forget.clicked.connect(self.forget)
+        
         btn_layout.addWidget(self.btn_yes)
         btn_layout.addWidget(self.btn_no)
+        btn_layout.addWidget(self.btn_forget)
         layout.addLayout(btn_layout)
         
         self.setTabOrder(info_label, self.btn_yes)
         self.setTabOrder(self.btn_yes, self.btn_no)
+        self.setTabOrder(self.btn_no, self.btn_forget)
+        
+    def forget(self):
+        self.done(2)
 
 class AudioRecorderApp(QMainWindow):
     error_signal = pyqtSignal(str)
@@ -919,6 +944,10 @@ class AudioRecorderApp(QMainWindow):
                 
         self.update_dashboard_status()
         
+        qApp = QApplication.instance()
+        if qApp:
+            qApp.commitDataRequest.connect(self.on_commit_data_request)
+        
         self.check_recovery_journal()
 
         if self.config.get("auto_start", False):
@@ -932,6 +961,16 @@ class AudioRecorderApp(QMainWindow):
                 self.auto_start_timer.start(delay * 1000)
             else:
                 self.auto_start_timer.start(100)
+
+    def on_commit_data_request(self, manager):
+        if self.is_recording or self.shutting_down:
+            self._pending_close = True
+            self.stop_recording(notify=False)
+            
+            # Spin the event loop to keep the process alive while finalizing
+            while self.shutting_down:
+                QApplication.processEvents()
+                time.sleep(0.05)
 
     def check_recovery_journal(self):
         journal_paths = [os.path.join(APP_DIR, "active_recording.json")]
@@ -953,13 +992,19 @@ class AudioRecorderApp(QMainWindow):
                     filepath = data.get("current_file", "")
                     if filepath and os.path.exists(filepath):
                         dialog = RepairDialog(filepath, self)
-                        if dialog.exec() == QDialog.DialogCode.Accepted:
+                        res = dialog.exec()
+                        if res == QDialog.DialogCode.Accepted:
                             if repair_wav_file(filepath):
                                 QMessageBox.information(self, "Repair Successful", "The audio file was successfully repaired and should now be playable.")
                                 try: os.remove(journal_path)
                                 except: pass
                             else:
                                 QMessageBox.warning(self, "Repair Failed", "Could not repair the audio file. It may be too corrupted or not a valid recording.")
+                        elif res == 2:  # Forget
+                            try: os.remove(journal_path)
+                            except: pass
+                        else:  # No, leave it alone
+                            pass
                     else:
                         try: os.remove(journal_path)
                         except: pass
@@ -1178,7 +1223,9 @@ class AudioRecorderApp(QMainWindow):
             if bytes_per_second == 0:
                 return
                 
-            remaining_minutes = free / (bytes_per_second * 60)
+            remaining_bytes = free - (256 * 1024 * 1024)
+            if remaining_bytes < 0: remaining_bytes = 0
+            remaining_minutes = remaining_bytes / (bytes_per_second * 60)
             
             if remaining_minutes <= 1 and self._last_disk_warning_level < 4:
                 self._last_disk_warning_level = 4
@@ -1213,7 +1260,7 @@ class AudioRecorderApp(QMainWindow):
         
         was_recording = self.is_recording
         if self.is_recording:
-            self.stop_recording(notify=False)
+            self.stop_recording(notify=True)
             
         if self.config.get("notify_drive_disconnect", True):
             msg = f"The drive {drive} was disconnected."
@@ -1257,7 +1304,7 @@ class AudioRecorderApp(QMainWindow):
             QMessageBox.critical(self, "Microphone Disconnected", msg)
         else:
             msg += "\n\nRecording is stopping. File integrity has not yet been confirmed."
-            self.stop_recording(notify=False)
+            self.stop_recording(notify=True)
             self.notify("Microphone Disconnected", msg, "notify_mic_disconnect")
             
             if self.config.get("auto_resume_unattended", False):
@@ -1380,7 +1427,7 @@ class AudioRecorderApp(QMainWindow):
                 return
             
             try:
-                expected_time = time.time()
+
                 mic1_failed = False
                 mic2_failed = False
                 continue_on_disc = self.config.get("continue_on_mic_disconnect", False)
@@ -1780,15 +1827,24 @@ class AudioRecorderApp(QMainWindow):
             self.current_session.stop_event.set()
         
         self.notify_on_stop = notify
+        self.shutdown_poll_count = 0
         self.shutdown_poll_timer.start(100)
         
     def poll_session_shutdown(self):
+        self.shutdown_poll_count = getattr(self, 'shutdown_poll_count', 0) + 1
+        
         if self.record_thread_handle and self.record_thread_handle.is_alive():
-            return
+            if self.shutdown_poll_count > 100:  # 10 seconds
+                logging.error("Writer thread stuck during shutdown!")
+            else:
+                return
             
         if self.current_session and hasattr(self.current_session, 'reader_threads'):
             if any(t.is_alive() for t in self.current_session.reader_threads):
-                return
+                if self.shutdown_poll_count > 50:  # 5 seconds
+                    logging.warning("Reader threads stuck during shutdown! Forcing exit from shutdown poll.")
+                else:
+                    return
             
         self.shutdown_poll_timer.stop()
         self.shutting_down = False
